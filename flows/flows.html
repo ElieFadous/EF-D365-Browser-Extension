@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flows</title>
+  <link rel="stylesheet" href="flows.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- ── Header ── -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="header-logo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true">
+            <path fill-rule="evenodd" fill="#fff" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+            <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+          </svg>
+        </div>
+        <div class="header-titles">
+          <span class="header-title">Power Automate Flows</span>
+          <span class="header-sub" id="env-url"></span>
+        </div>
+      </div>
+      <span class="header-env-badge" id="env-name"></span>
+    </header>
+
+    <!-- ── Solution bar ── -->
+    <div class="solution-bar">
+      <label class="sol-label" for="solution-select">Solution</label>
+      <select id="solution-select" class="sol-select">
+        <option value="">Loading solutions…</option>
+      </select>
+      <button id="btn-set-default" class="sol-icon-btn" title="Set as default solution">☆</button>
+      <button id="btn-refresh"     class="sol-icon-btn" title="Refresh flows">&#8635;</button>
+    </div>
+
+    <!-- ── Two-panel body ── -->
+    <div class="app-body">
+
+      <!-- Flows panel -->
+      <div class="panel flows-panel">
+        <div class="panel-header">
+          <span class="panel-title">Flows</span>
+          <span id="flow-count" class="panel-count"></span>
+        </div>
+        <div class="panel-toolbar">
+          <div class="search-wrap">
+            <span class="search-icon">&#128269;</span>
+            <input type="search" id="flow-search" class="search-input" placeholder="Search flows…" autocomplete="off" />
+          </div>
+          <div class="seg-ctrl" id="flow-status-filter" role="group">
+            <button class="seg-btn active" data-status="all">All</button>
+            <button class="seg-btn" data-status="active">On</button>
+            <button class="seg-btn" data-status="inactive">Off</button>
+          </div>
+        </div>
+        <div id="flow-list" class="panel-body">
+          <div class="state-msg state-info">Select a solution to load flows.</div>
+        </div>
+      </div>
+
+      <!-- Executions panel -->
+      <div class="panel executions-panel">
+        <div class="panel-header">
+          <span class="panel-title">Executions</span>
+          <span id="exec-scope" class="exec-scope"></span>
+          <button id="btn-clear-flow-filter" class="exec-clear-btn hidden">&#215; Clear filter</button>
+          <span id="exec-count" class="panel-count"></span>
+        </div>
+        <div class="panel-toolbar exec-toolbar">
+          <!-- Row 1: date range + status + search + apply -->
+          <input type="datetime-local" id="exec-from" class="date-input" title="From date" />
+          <span class="date-sep">→</span>
+          <input type="datetime-local" id="exec-to"   class="date-input" title="To date" />
+          <select id="exec-status-filter" class="status-select">
+            <option value="">All Statuses</option>
+            <option value="succeeded">Succeeded</option>
+            <option value="failed">Failed</option>
+            <option value="running">Running</option>
+            <option value="waiting">Waiting</option>
+            <option value="canceled">Canceled</option>
+          </select>
+          <div class="search-wrap search-wrap--sm">
+            <span class="search-icon">&#128269;</span>
+            <input type="search" id="exec-search" class="search-input" placeholder="Search…" autocomplete="off" />
+          </div>
+          <button id="btn-apply-exec" class="apply-btn">Apply</button>
+          <!-- Row 2: duration filter (client-side, no reload needed) -->
+          <div class="toolbar-break"></div>
+          <span class="dur-label">Duration</span>
+          <select id="dur-op" class="dur-select">
+            <option value="">— Any —</option>
+            <option value="gt">&gt; Greater than</option>
+            <option value="lt">&lt; Less than</option>
+          </select>
+          <input type="number" id="dur-value" class="dur-input" placeholder="value" min="0" />
+          <select id="dur-unit" class="dur-select">
+            <option value="ms">ms</option>
+            <option value="s">seconds</option>
+            <option value="min">minutes</option>
+            <option value="h">hours</option>
+          </select>
+          <button id="btn-clear-dur" class="dur-clear-btn" title="Clear duration filter">&#215;</button>
+        </div>
+        <div id="exec-list" class="panel-body">
+          <div class="state-msg state-info">Load flows to see executions.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  <script src="flows.js"></script>
+</body>
+</html>

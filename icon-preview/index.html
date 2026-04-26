@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>EF PPT — Icon Concepts</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #f0f4f8;
+      padding: 32px;
+      color: #1e293b;
+    }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+    .subtitle { font-size: 13px; color: #64748b; margin-bottom: 36px; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 28px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 28px 20px 20px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.08);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+      color: #1e293b;
+    }
+    .card-desc {
+      font-size: 11px;
+      color: #64748b;
+      text-align: center;
+      line-height: 1.5;
+      margin-top: -14px;
+    }
+
+    /* Size previews */
+    .sizes {
+      display: flex;
+      align-items: flex-end;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .size-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .size-label {
+      font-size: 10px;
+      color: #94a3b8;
+    }
+
+    /* Dark and light backgrounds */
+    .bg-previews {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .bg-box {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .bg-white { background: #fff; border: 1px solid #e2e8f0; }
+    .bg-dark  { background: #1e293b; }
+    .bg-gray  { background: #94a3b8; }
+  </style>
+</head>
+<body>
+
+<h1>EF Power Platform Tools — Icon Concepts</h1>
+<p class="subtitle">Each icon shown at 128 px, 48 px, 16 px · Plus on white, dark, and grey backgrounds</p>
+
+<div class="grid">
+
+  <!-- ── Concept 1: Angular D (D365-inspired) + Lightning bolt ── -->
+  <div class="card">
+    <div class="card-title">A · D365 Angular D + Bolt</div>
+    <div class="sizes">
+      <!-- 128px -->
+      <div class="size-wrap">
+        <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gA" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#0090F1"/>
+              <stop offset="100%" stop-color="#004E8C"/>
+            </linearGradient>
+          </defs>
+          <!-- Angular D (D365-inspired) via evenodd -->
+          <path fill-rule="evenodd" fill="url(#gA)"
+            d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z
+               M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+          <!-- Lightning bolt in the D cutout -->
+          <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+        </svg>
+        <span class="size-label">128</span>
+      </div>
+      <!-- 48px -->
+      <div class="size-wrap">
+        <svg width="48" height="48" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gA2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs>
+          <path fill-rule="evenodd" fill="url(#gA2)" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+          <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+        </svg>
+        <span class="size-label">48</span>
+      </div>
+      <!-- 16px -->
+      <div class="size-wrap">
+        <svg width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gA3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs>
+          <path fill-rule="evenodd" fill="url(#gA3)" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+          <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+        </svg>
+        <span class="size-label">16</span>
+      </div>
+    </div>
+    <!-- Background previews -->
+    <div class="bg-previews">
+      <div class="bg-box bg-white"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gAb1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#gAb1)" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/><polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/></svg></div>
+      <div class="bg-box bg-dark"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gAb2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#gAb2)" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/><polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/></svg></div>
+      <div class="bg-box bg-gray"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gAb3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#gAb3)" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/><polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/></svg></div>
+    </div>
+    <div class="card-desc">D365 angular D silhouette · Gold bolt in the negative space</div>
+  </div>
+
+  <!-- ── Concept B: Filled hexagon + EF monogram ── -->
+  <div class="card">
+    <div class="card-title">B · Hexagon + EF Monogram</div>
+    <div class="sizes">
+      <div class="size-wrap">
+        <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gB" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#0090F1"/>
+              <stop offset="100%" stop-color="#004E8C"/>
+            </linearGradient>
+          </defs>
+          <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gB)"/>
+          <text x="32" y="40" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800"
+            fill="white" text-anchor="middle" letter-spacing="-1">EF</text>
+        </svg>
+        <span class="size-label">128</span>
+      </div>
+      <div class="size-wrap">
+        <svg width="48" height="48" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gB2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs>
+          <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gB2)"/>
+          <text x="32" y="40" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800" fill="white" text-anchor="middle" letter-spacing="-1">EF</text>
+        </svg>
+        <span class="size-label">48</span>
+      </div>
+      <div class="size-wrap">
+        <svg width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gB3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs>
+          <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gB3)"/>
+          <text x="32" y="40" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="800" fill="white" text-anchor="middle" letter-spacing="-1">EF</text>
+        </svg>
+        <span class="size-label">16</span>
+      </div>
+    </div>
+    <div class="bg-previews">
+      <div class="bg-box bg-white"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gBb1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gBb1)"/><text x="32" y="40" font-family="Arial" font-size="22" font-weight="800" fill="white" text-anchor="middle">EF</text></svg></div>
+      <div class="bg-box bg-dark"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gBb2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gBb2)"/><text x="32" y="40" font-family="Arial" font-size="22" font-weight="800" fill="white" text-anchor="middle">EF</text></svg></div>
+      <div class="bg-box bg-gray"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gBb3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gBb3)"/><text x="32" y="40" font-family="Arial" font-size="22" font-weight="800" fill="white" text-anchor="middle">EF</text></svg></div>
+    </div>
+    <div class="card-desc">Clean hexagon · Bold "EF" initials · Reads perfectly at 16 px</div>
+  </div>
+
+  <!-- ── Concept C: D shape + Wrench badge ── -->
+  <div class="card">
+    <div class="card-title">C · D365 D Shape + Wrench</div>
+    <div class="sizes">
+      <div class="size-wrap">
+        <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gC" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#0090F1"/>
+              <stop offset="100%" stop-color="#004E8C"/>
+            </linearGradient>
+          </defs>
+          <!-- Rounded D shape -->
+          <path d="M 10,8 L 38,8 Q 58,8 58,32 Q 58,56 38,56 L 10,56 Z" fill="url(#gC)"/>
+          <path d="M 20,18 L 34,18 Q 46,18 46,32 Q 46,46 34,46 L 20,46 Z" fill="white" opacity="0.15"/>
+          <!-- Wrench (white) centered in the D -->
+          <g transform="translate(30,22) rotate(45,6,10)" fill="white">
+            <!-- Head circle ring -->
+            <circle cx="6" cy="5" r="5" fill="none" stroke="white" stroke-width="3.5"/>
+            <circle cx="6" cy="5" r="1.5" fill="white"/>
+            <!-- Handle -->
+            <rect x="4.5" y="8" width="3" height="12" rx="1.5" fill="white"/>
+          </g>
+        </svg>
+        <span class="size-label">128</span>
+      </div>
+      <div class="size-wrap">
+        <svg width="48" height="48" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gC2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs>
+          <path d="M 10,8 L 38,8 Q 58,8 58,32 Q 58,56 38,56 L 10,56 Z" fill="url(#gC2)"/>
+          <path d="M 20,18 L 34,18 Q 46,18 46,32 Q 46,46 34,46 L 20,46 Z" fill="white" opacity="0.15"/>
+          <g transform="translate(30,22) rotate(45,6,10)" fill="white">
+            <circle cx="6" cy="5" r="5" fill="none" stroke="white" stroke-width="3.5"/>
+            <circle cx="6" cy="5" r="1.5" fill="white"/>
+            <rect x="4.5" y="8" width="3" height="12" rx="1.5" fill="white"/>
+          </g>
+        </svg>
+        <span class="size-label">48</span>
+      </div>
+      <div class="size-wrap">
+        <svg width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gC3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs>
+          <path d="M 10,8 L 38,8 Q 58,8 58,32 Q 58,56 38,56 L 10,56 Z" fill="url(#gC3)"/>
+          <g transform="translate(30,22) rotate(45,6,10)" fill="white">
+            <circle cx="6" cy="5" r="5" fill="none" stroke="white" stroke-width="3.5"/>
+            <circle cx="6" cy="5" r="1.5" fill="white"/>
+            <rect x="4.5" y="8" width="3" height="12" rx="1.5" fill="white"/>
+          </g>
+        </svg>
+        <span class="size-label">16</span>
+      </div>
+    </div>
+    <div class="bg-previews">
+      <div class="bg-box bg-white"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gCb1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><path d="M 10,8 L 38,8 Q 58,8 58,32 Q 58,56 38,56 L 10,56 Z" fill="url(#gCb1)"/><g transform="translate(30,22) rotate(45,6,10)"><circle cx="6" cy="5" r="5" fill="none" stroke="white" stroke-width="3.5"/><circle cx="6" cy="5" r="1.5" fill="white"/><rect x="4.5" y="8" width="3" height="12" rx="1.5" fill="white"/></g></svg></div>
+      <div class="bg-box bg-dark"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gCb2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><path d="M 10,8 L 38,8 Q 58,8 58,32 Q 58,56 38,56 L 10,56 Z" fill="url(#gCb2)"/><g transform="translate(30,22) rotate(45,6,10)"><circle cx="6" cy="5" r="5" fill="none" stroke="white" stroke-width="3.5"/><circle cx="6" cy="5" r="1.5" fill="white"/><rect x="4.5" y="8" width="3" height="12" rx="1.5" fill="white"/></g></svg></div>
+      <div class="bg-box bg-gray"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gCb3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><path d="M 10,8 L 38,8 Q 58,8 58,32 Q 58,56 38,56 L 10,56 Z" fill="url(#gCb3)"/><g transform="translate(30,22) rotate(45,6,10)"><circle cx="6" cy="5" r="5" fill="none" stroke="white" stroke-width="3.5"/><circle cx="6" cy="5" r="1.5" fill="white"/><rect x="4.5" y="8" width="3" height="12" rx="1.5" fill="white"/></g></svg></div>
+    </div>
+    <div class="card-desc">Rounded D shape (D365-like) · White wrench overlay · Tool-focused</div>
+  </div>
+
+  <!-- ── Concept D: Hexagon + Gear cutout ── -->
+  <div class="card">
+    <div class="card-title">D · Hexagon + Gear</div>
+    <div class="sizes">
+      <div class="size-wrap">
+        <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gD" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#0090F1"/>
+              <stop offset="100%" stop-color="#004E8C"/>
+            </linearGradient>
+          </defs>
+          <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gD)"/>
+          <!-- Gear (white) -->
+          <g transform="translate(32,32)" fill="white">
+            <!-- Gear teeth via small rectangles radiating out -->
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5"/>
+            <rect x="-3.5" y="11" width="7" height="7" rx="1.5" transform="rotate(180 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(60 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(120 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(240 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(300 0 0)"/>
+            <!-- Outer ring -->
+            <circle cx="0" cy="0" r="12" fill="white"/>
+            <!-- Inner hole -->
+            <circle cx="0" cy="0" r="5" fill="url(#gD)"/>
+          </g>
+        </svg>
+        <span class="size-label">128</span>
+      </div>
+      <div class="size-wrap">
+        <svg width="48" height="48" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gD2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs>
+          <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gD2)"/>
+          <g transform="translate(32,32)" fill="white">
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(60 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(120 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(180 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(240 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(300 0 0)"/>
+            <circle cx="0" cy="0" r="12" fill="white"/>
+            <circle cx="0" cy="0" r="5" fill="url(#gD2)"/>
+          </g>
+        </svg>
+        <span class="size-label">48</span>
+      </div>
+      <div class="size-wrap">
+        <svg width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gD3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs>
+          <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gD3)"/>
+          <g transform="translate(32,32)" fill="white">
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(60 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(120 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(180 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(240 0 0)"/>
+            <rect x="-3.5" y="-18" width="7" height="7" rx="1.5" transform="rotate(300 0 0)"/>
+            <circle cx="0" cy="0" r="12" fill="white"/>
+            <circle cx="0" cy="0" r="5" fill="url(#gD3)"/>
+          </g>
+        </svg>
+        <span class="size-label">16</span>
+      </div>
+    </div>
+    <div class="bg-previews">
+      <div class="bg-box bg-white"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gDb1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gDb1)"/><g transform="translate(32,32)"><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(60 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(120 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(180 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(240 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(300 0 0)"/><circle cx="0" cy="0" r="12" fill="white"/><circle cx="0" cy="0" r="5" fill="url(#gDb1)"/></g></svg></div>
+      <div class="bg-box bg-dark"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gDb2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gDb2)"/><g transform="translate(32,32)"><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(60 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(120 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(180 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(240 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(300 0 0)"/><circle cx="0" cy="0" r="12" fill="white"/><circle cx="0" cy="0" r="5" fill="url(#gDb2)"/></g></svg></div>
+      <div class="bg-box bg-gray"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gDb3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gDb3)"/><g transform="translate(32,32)"><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(60 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(120 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(180 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(240 0 0)"/><rect x="-3.5" y="-18" width="7" height="7" rx="1.5" fill="white" transform="rotate(300 0 0)"/><circle cx="0" cy="0" r="12" fill="white"/><circle cx="0" cy="0" r="5" fill="url(#gDb3)"/></g></svg></div>
+    </div>
+    <div class="card-desc">Hexagon + full gear centred · Classic dev/settings tool feel</div>
+  </div>
+
+  <!-- ── Concept E: D shape + EF badge corner ── -->
+  <div class="card">
+    <div class="card-title">E · D365 D + EF Badge</div>
+    <div class="sizes">
+      <div class="size-wrap">
+        <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gE" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#0090F1"/>
+              <stop offset="100%" stop-color="#004E8C"/>
+            </linearGradient>
+          </defs>
+          <!-- Angular D shape (D365-inspired) -->
+          <path fill-rule="evenodd" fill="url(#gE)"
+            d="M 8,6 L 44,6 L 58,20 L 58,44 L 44,58 L 8,58 Z
+               M 20,18 L 38,18 L 50,28 L 50,36 L 38,46 L 20,46 Z"/>
+          <!-- EF label inside the D cutout -->
+          <text x="35" y="37" font-family="'Segoe UI',Arial,sans-serif" font-size="14" font-weight="800"
+            fill="#FFB900" text-anchor="middle">EF</text>
+          <!-- Small bolt top-right corner badge -->
+          <circle cx="50" cy="14" r="9" fill="#FFB900"/>
+          <polygon points="52,8 48,15 51,15 47,21 55,13 52,13" fill="white"/>
+        </svg>
+        <span class="size-label">128</span>
+      </div>
+      <div class="size-wrap">
+        <svg width="48" height="48" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gE2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs>
+          <path fill-rule="evenodd" fill="url(#gE2)" d="M 8,6 L 44,6 L 58,20 L 58,44 L 44,58 L 8,58 Z M 20,18 L 38,18 L 50,28 L 50,36 L 38,46 L 20,46 Z"/>
+          <text x="35" y="37" font-family="Arial" font-size="14" font-weight="800" fill="#FFB900" text-anchor="middle">EF</text>
+          <circle cx="50" cy="14" r="9" fill="#FFB900"/>
+          <polygon points="52,8 48,15 51,15 47,21 55,13 52,13" fill="white"/>
+        </svg>
+        <span class="size-label">48</span>
+      </div>
+      <div class="size-wrap">
+        <svg width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gE3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs>
+          <path fill-rule="evenodd" fill="url(#gE3)" d="M 8,6 L 44,6 L 58,20 L 58,44 L 44,58 L 8,58 Z M 20,18 L 38,18 L 50,28 L 50,36 L 38,46 L 20,46 Z"/>
+          <text x="35" y="37" font-family="Arial" font-size="14" font-weight="800" fill="#FFB900" text-anchor="middle">EF</text>
+          <circle cx="50" cy="14" r="9" fill="#FFB900"/>
+          <polygon points="52,8 48,15 51,15 47,21 55,13 52,13" fill="white"/>
+        </svg>
+        <span class="size-label">16</span>
+      </div>
+    </div>
+    <div class="bg-previews">
+      <div class="bg-box bg-white"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gEb1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#gEb1)" d="M 8,6 L 44,6 L 58,20 L 58,44 L 44,58 L 8,58 Z M 20,18 L 38,18 L 50,28 L 50,36 L 38,46 L 20,46 Z"/><text x="35" y="37" font-family="Arial" font-size="14" font-weight="800" fill="#FFB900" text-anchor="middle">EF</text><circle cx="50" cy="14" r="9" fill="#FFB900"/><polygon points="52,8 48,15 51,15 47,21 55,13 52,13" fill="white"/></svg></div>
+      <div class="bg-box bg-dark"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gEb2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#gEb2)" d="M 8,6 L 44,6 L 58,20 L 58,44 L 44,58 L 8,58 Z M 20,18 L 38,18 L 50,28 L 50,36 L 38,46 L 20,46 Z"/><text x="35" y="37" font-family="Arial" font-size="14" font-weight="800" fill="#FFB900" text-anchor="middle">EF</text><circle cx="50" cy="14" r="9" fill="#FFB900"/><polygon points="52,8 48,15 51,15 47,21 55,13 52,13" fill="white"/></svg></div>
+      <div class="bg-box bg-gray"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gEb3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0090F1"/><stop offset="100%" stop-color="#004E8C"/></linearGradient></defs><path fill-rule="evenodd" fill="url(#gEb3)" d="M 8,6 L 44,6 L 58,20 L 58,44 L 44,58 L 8,58 Z M 20,18 L 38,18 L 50,28 L 50,36 L 38,46 L 20,46 Z"/><text x="35" y="37" font-family="Arial" font-size="14" font-weight="800" fill="#FFB900" text-anchor="middle">EF</text><circle cx="50" cy="14" r="9" fill="#FFB900"/><polygon points="52,8 48,15 51,15 47,21 55,13 52,13" fill="white"/></svg></div>
+    </div>
+    <div class="card-desc">D365 D · "EF" gold inside the opening · Gold bolt corner badge</div>
+  </div>
+
+  <!-- ── Concept F: Hexagon + Bolt + EF small ── -->
+  <div class="card">
+    <div class="card-title">F · Hexagon + Bolt + EF</div>
+    <div class="sizes">
+      <div class="size-wrap">
+        <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gF" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#1B3A6B"/>
+              <stop offset="100%" stop-color="#0f2040"/>
+            </linearGradient>
+          </defs>
+          <!-- Dark navy hexagon -->
+          <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gF)"/>
+          <!-- D365 blue inner ring -->
+          <polygon points="32,10 52,22 52,42 32,54 12,42 12,22" fill="none" stroke="#0078D4" stroke-width="2.5"/>
+          <!-- Lightning bolt -->
+          <polygon points="36,16 26,33 33,33 27,50 44,29 36,29" fill="#0090F1"/>
+          <!-- EF small bottom -->
+          <text x="32" y="57" font-family="'Segoe UI',Arial,sans-serif" font-size="8" font-weight="700"
+            fill="#0090F1" text-anchor="middle" letter-spacing="2">EF</text>
+        </svg>
+        <span class="size-label">128</span>
+      </div>
+      <div class="size-wrap">
+        <svg width="48" height="48" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gF2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#1B3A6B"/><stop offset="100%" stop-color="#0f2040"/></linearGradient></defs>
+          <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gF2)"/>
+          <polygon points="32,10 52,22 52,42 32,54 12,42 12,22" fill="none" stroke="#0078D4" stroke-width="2.5"/>
+          <polygon points="36,16 26,33 33,33 27,50 44,29 36,29" fill="#0090F1"/>
+        </svg>
+        <span class="size-label">48</span>
+      </div>
+      <div class="size-wrap">
+        <svg width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="gF3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#1B3A6B"/><stop offset="100%" stop-color="#0f2040"/></linearGradient></defs>
+          <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gF3)"/>
+          <polygon points="36,16 26,33 33,33 27,50 44,29 36,29" fill="#0090F1"/>
+        </svg>
+        <span class="size-label">16</span>
+      </div>
+    </div>
+    <div class="bg-previews">
+      <div class="bg-box bg-white"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gFb1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#1B3A6B"/><stop offset="100%" stop-color="#0f2040"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gFb1)"/><polygon points="32,10 52,22 52,42 32,54 12,42 12,22" fill="none" stroke="#0078D4" stroke-width="2.5"/><polygon points="36,16 26,33 33,33 27,50 44,29 36,29" fill="#0090F1"/></svg></div>
+      <div class="bg-box bg-dark"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gFb2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#1B3A6B"/><stop offset="100%" stop-color="#0f2040"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gFb2)"/><polygon points="32,10 52,22 52,42 32,54 12,42 12,22" fill="none" stroke="#0078D4" stroke-width="2.5"/><polygon points="36,16 26,33 33,33 27,50 44,29 36,29" fill="#0090F1"/></svg></div>
+      <div class="bg-box bg-gray"><svg width="24" height="24" viewBox="0 0 64 64"><defs><linearGradient id="gFb3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#1B3A6B"/><stop offset="100%" stop-color="#0f2040"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="url(#gFb3)"/><polygon points="32,10 52,22 52,42 32,54 12,42 12,22" fill="none" stroke="#0078D4" stroke-width="2.5"/><polygon points="36,16 26,33 33,33 27,50 44,29 36,29" fill="#0090F1"/></svg></div>
+    </div>
+    <div class="card-desc">Dark navy hex · D365 blue inner hex ring · Blue bolt · Layered depth</div>
+  </div>
+
+</div>
+
+</body>
+</html>

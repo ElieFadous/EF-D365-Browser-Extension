@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EF Power Platform Tools — Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-brand">
+      <div class="header-logo">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="26" height="26" aria-hidden="true">
+          <path fill-rule="evenodd" fill="#fff"
+            d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z
+               M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+          <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+        </svg>
+      </div>
+      <div class="header-titles">
+        <span class="header-title">EF Power Platform Tools</span>
+        <span class="header-sub">Extension Settings</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <div class="settings-layout">
+
+      <!-- Left navigation tabs -->
+      <nav class="settings-nav" aria-label="Settings sections">
+        <button class="settings-tab active" data-tab="environments">
+          <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
+            <line x1="1.5" y1="6.5" x2="14.5" y2="6.5"/>
+            <line x1="5" y1="6.5" x2="5" y2="13"/>
+          </svg>
+          Environments
+        </button>
+        <button class="settings-tab" data-tab="api">
+          <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 11l4-6 3 4 2-2.5 3 4.5"/>
+            <circle cx="12" cy="4" r="1.5"/>
+          </svg>
+          API
+        </button>
+        <button class="settings-tab" data-tab="clone">
+          <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4.5" y="3.5" width="9" height="11" rx="1.5"/>
+            <path d="M2 11.5V2.5A1.5 1.5 0 0 1 3.5 1H11"/>
+          </svg>
+          Clone
+        </button>
+        <button class="settings-tab" data-tab="model-driven-apps">
+          <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="1.5" y="2" width="13" height="10" rx="1.5"/>
+            <circle cx="8" cy="7" r="2.5"/>
+            <path d="M1.5 12.5h13"/>
+          </svg>
+          Model Driven Apps
+        </button>
+        <button class="settings-tab" data-tab="data-sync">
+          <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 5h12M2 11h12"/>
+            <polyline points="6,2 2,5 6,8"/>
+            <polyline points="10,8 14,11 10,14"/>
+          </svg>
+          Data Sync
+        </button>
+        <button class="settings-tab" data-tab="plugin-trace">
+          <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="12" height="10" rx="1.5"/>
+            <line x1="5" y1="7" x2="11" y2="7"/>
+            <line x1="5" y1="10" x2="9" y2="10"/>
+          </svg>
+          Plugin Trace
+        </button>
+        <button class="settings-tab" data-tab="import-export">
+          <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 2v9M5 8l3 3 3-3"/>
+            <path d="M2 12v1a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-1"/>
+          </svg>
+          Import / Export
+        </button>
+      </nav>
+
+      <!-- Right content panels -->
+      <div class="settings-content">
+
+        <!-- ── Panel: Environments ── -->
+        <div id="panel-environments" class="settings-panel">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Environments</h2>
+              <p class="panel-desc">Add, edit, or remove Dynamics 365 environments. Changes take effect immediately.</p>
+            </div>
+            <button id="btn-add" class="btn btn--primary">+ Add Environment</button>
+          </div>
+          <div class="table-wrap">
+            <table id="env-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>URL</th>
+                  <th>Color</th>
+                  <th>Warn (Prod)</th>
+                  <th>PA Env ID</th>
+                  <th>Features</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="env-tbody">
+                <!-- Rows injected by JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ── Panel: API ── -->
+        <div id="panel-api" class="settings-panel hidden">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">API Settings</h2>
+              <p class="panel-desc">Configure the Dynamics 365 Web API version used by all features.</p>
+            </div>
+          </div>
+          <div class="form-row" style="max-width:320px">
+            <label for="api-version">D365 API Version</label>
+            <input type="text" id="api-version" placeholder="v9.2" />
+            <span class="hint">Format: <code>v9.2</code> — must start with <code>v</code> followed by digits. Default: <code>v9.2</code></span>
+            <div id="api-version-error" class="field-error hidden"></div>
+          </div>
+          <div>
+            <button id="btn-save-settings" class="btn btn--primary">Save API Settings</button>
+          </div>
+        </div>
+
+        <!-- ── Panel: Clone ── -->
+        <div id="panel-clone" class="settings-panel hidden">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Clone Settings</h2>
+              <p class="panel-desc">Control how records are cloned within and across environments.</p>
+            </div>
+          </div>
+
+          <div class="form-row" style="max-width:320px">
+            <label for="clone-prefix">Record name prefix <span class="hint">(optional — format: [prefix] original name)</span></label>
+            <input type="text" id="clone-prefix" placeholder="e.g. COPY" />
+          </div>
+
+          <div class="form-row">
+            <label>Allowed entity tables</label>
+            <div class="radio-stack">
+              <label class="radio-label"><input type="radio" name="clone-scope" value="all" /> All tables</label>
+              <label class="radio-label"><input type="radio" name="clone-scope" value="whitelist" /> Specific tables only</label>
+            </div>
+          </div>
+          <div class="form-row" id="clone-whitelist-row" style="display:none">
+            <label for="clone-whitelist">Entity logical names <span class="hint">(one per line or comma-separated)</span></label>
+            <textarea id="clone-whitelist" rows="4" placeholder="e.g. account&#10;contact&#10;incident" style="font-family:monospace;resize:vertical;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);outline:none"></textarea>
+          </div>
+
+          <div class="form-row">
+            <label>If a lookup field can't be resolved in the target environment (cross-env copy):</label>
+            <div class="radio-stack">
+              <label class="radio-label"><input type="radio" name="clone-lookup-mode" value="skip" /> Skip the field and continue <span class="hint">(recommended)</span></label>
+              <label class="radio-label"><input type="radio" name="clone-lookup-mode" value="fail" /> Fail the whole clone</label>
+            </div>
+          </div>
+
+          <div>
+            <button id="btn-save-clone-settings" class="btn btn--primary">Save Clone Settings</button>
+          </div>
+        </div>
+
+        <!-- ── Panel: Model Driven Apps ── -->
+        <div id="panel-model-driven-apps" class="settings-panel hidden">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Model Driven Apps</h2>
+              <p class="panel-desc">Load apps from your Dynamics 365 environments, choose a default, and select which apps appear in Go To → App.</p>
+            </div>
+            <button id="btn-load-mda" class="btn btn--primary">Load Apps</button>
+          </div>
+
+          <div id="mda-status" class="state-msg state-info">Click <strong>Load Apps</strong> while signed in to your Dynamics 365 environments to discover available apps.</div>
+
+          <div id="mda-list" class="hidden">
+            <!-- rows injected by JS -->
+          </div>
+
+          <div id="mda-save-row" class="hidden">
+            <button id="btn-save-mda" class="btn btn--primary">Save App Settings</button>
+          </div>
+        </div>
+
+        <!-- ── Panel: Data Sync ── -->
+        <div id="panel-data-sync" class="settings-panel hidden">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Data Sync Settings</h2>
+              <p class="panel-desc">Configure behaviour for the Data Sync tool.</p>
+            </div>
+          </div>
+          <div class="form-row" style="max-width:320px">
+            <label for="sync-batch-size">Warning threshold (records)</label>
+            <input type="number" id="sync-batch-size" min="1" max="50000" placeholder="250" />
+            <span class="hint">Warn before syncing more than this many records. Default: 250.</span>
+          </div>
+          <div>
+            <button id="btn-save-sync-settings" class="btn btn--primary">Save Data Sync Settings</button>
+          </div>
+        </div>
+
+        <!-- ── Panel: Plugin Trace ── -->
+        <div id="panel-plugin-trace" class="settings-panel hidden">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Plugin Trace Logs</h2>
+              <p class="panel-desc">Manage ignored plugin types. Ignored types are hidden from the Plugin Trace Logs viewer. Right-click any log row in the viewer to add a type to this list.</p>
+            </div>
+          </div>
+
+          <div class="form-row" style="max-width:520px">
+            <label for="new-ignored-type">Add plugin type manually</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" id="new-ignored-type" placeholder="e.g. MyOrg.Plugins.MyPlugin" style="flex:1" />
+              <button id="btn-add-ignored-type" class="btn btn--secondary">Add</button>
+            </div>
+            <span class="hint">Enter the short type name (without assembly version info).</span>
+          </div>
+
+          <div id="ignored-types-list" style="margin-top:4px">
+            <!-- rows injected by JS -->
+          </div>
+        </div>
+
+        <!-- ── Panel: Import / Export ── -->
+        <div id="panel-import-export" class="settings-panel hidden">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">Import / Export</h2>
+              <p class="panel-desc">Export your environments as JSON to share or back up, or import from a file.</p>
+            </div>
+          </div>
+          <div class="io-row">
+            <button id="btn-export" class="btn btn--secondary">Export JSON</button>
+            <label class="btn btn--secondary" for="file-import">Import JSON</label>
+            <input type="file" id="file-import" accept=".json" class="hidden" />
+            <button id="btn-reset" class="btn btn--danger">Reset to Defaults</button>
+          </div>
+        </div>
+
+      </div><!-- /.settings-content -->
+    </div><!-- /.settings-layout -->
+
+  </main>
+
+  <!-- Add / Edit environment modal (outside layout, at page level) -->
+  <div id="modal-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal">
+      <h3 class="modal-title" id="modal-title">Add Environment</h3>
+      <form id="env-form" novalidate>
+        <input type="hidden" id="field-index" value="-1" />
+
+        <div class="form-row">
+          <label for="field-url">URL <span class="hint">(no trailing slash)</span></label>
+          <input type="url" id="field-url" placeholder="https://myenv.crm4.dynamics.com" required />
+        </div>
+        <div class="form-row">
+          <label for="field-id">ID <span class="hint">(auto-derived from URL)</span></label>
+          <input type="text" id="field-id" readonly style="background:var(--bg);color:var(--text-muted);cursor:default" required />
+        </div>
+        <div class="form-row">
+          <label for="field-name">Display Name</label>
+          <input type="text" id="field-name" placeholder="e.g. MY ENV" required />
+        </div>
+        <div class="form-row">
+          <label for="field-power-apps-id">Power Apps Environment ID <span class="hint">(optional — for Solutions &amp; Flows links)</span></label>
+          <input type="text" id="field-power-apps-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+        </div>
+        <div class="form-row">
+          <div class="form-row__header">
+            <label>Enabled For <span class="hint">(all on by default)</span></label>
+            <div class="feature-toggle-actions">
+              <button type="button" id="feat-all" class="link-btn">All</button>
+              <span>&middot;</span>
+              <button type="button" id="feat-none" class="link-btn">None</button>
+            </div>
+          </div>
+          <div class="feature-toggle-grid" id="field-enabled-for">
+            <!-- chips injected by JS -->
+          </div>
+        </div>
+        <div class="form-row form-row--inline">
+          <div>
+            <label for="field-color">Badge Color</label>
+            <input type="color" id="field-color" value="#2563eb" />
+          </div>
+          <div class="form-check">
+            <input type="checkbox" id="field-warn" />
+            <label for="field-warn">Warn (mark as Production)</label>
+          </div>
+          <div class="form-check">
+            <input type="checkbox" id="field-highlight-tab" />
+            <label for="field-highlight-tab">Highlight tab with env color <span class="hint">(colored stripe at top of page)</span></label>
+          </div>
+        </div>
+
+        <div id="form-error" class="form-error hidden"></div>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel" class="btn btn--secondary">Cancel</button>
+          <button type="submit" class="btn btn--primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script src="options.js"></script>
+</body>
+</html>

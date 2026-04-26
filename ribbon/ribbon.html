@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EF Power Platform Tools — Ribbon Buttons</title>
+  <link rel="stylesheet" href="ribbon.css" />
+</head>
+<body>
+
+  <div class="app" id="app">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="app-header__brand">
+        <div class="app-logo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true">
+            <path fill-rule="evenodd" fill="#fff" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+            <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+          </svg>
+        </div>
+        <div>
+          <span class="app-title">Ribbon Buttons</span>
+          <span class="app-sub">EF Power Platform Tools</span>
+        </div>
+      </div>
+      <div class="app-header__right">
+        <button class="btn btn--change hidden" id="btn-change-solution">&#8592; Change Solution</button>
+        <button class="btn btn--export hidden" id="btn-export-csv">&#8659; Export CSV</button>
+        <div class="app-header__env">
+          <span class="env-dot" id="env-dot"></span>
+          <span class="env-label" id="env-name">—</span>
+          <span class="env-url-label" id="env-url"></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Global loading overlay -->
+    <div class="global-overlay" id="global-loading">
+      <div class="global-overlay__box">
+        <div class="spinner spinner--lg"></div>
+        <p id="loading-text">Loading…</p>
+      </div>
+    </div>
+
+    <!-- Global error overlay -->
+    <div class="global-overlay hidden" id="global-error">
+      <div class="global-overlay__box global-overlay__box--error">
+        <div class="error-icon">!</div>
+        <p id="error-text"></p>
+        <a id="env-link" href="#" target="_blank" class="btn btn--primary" style="margin-top:12px">Open Environment</a>
+      </div>
+    </div>
+
+    <!-- ── Solution picker ── -->
+    <div class="solution-picker" id="solution-picker" style="display:none">
+      <div class="picker-card">
+        <div class="picker-card-header">
+          <h2>Select a Solution</h2>
+          <p>Ribbon buttons will be loaded only for tables included in the selected solution, keeping loading fast.</p>
+        </div>
+
+        <div class="picker-search-wrap">
+          <span class="search-icon">&#128269;</span>
+          <input type="search" id="solution-search" class="search-input" placeholder="Search solutions…" autocomplete="off" />
+        </div>
+
+        <div class="solution-list" id="solution-list">
+          <!-- Injected by JS -->
+        </div>
+
+        <div class="picker-footer">
+          <button class="link-btn" id="btn-load-all">Load all tables without filtering &#8594;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Two-pane body ── -->
+    <div class="app-body" id="app-body" style="display:none">
+
+      <!-- Left sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-top">
+          <div class="sidebar-solution-badge" id="sidebar-solution-badge" style="display:none">
+            <span class="sidebar-solution-name" id="sidebar-solution-name"></span>
+          </div>
+          <div class="search-wrap">
+            <span class="search-icon">&#128269;</span>
+            <input type="search" id="search-input" class="search-input" placeholder="Search tables…" autocomplete="off" />
+          </div>
+          <div class="sidebar-filters">
+            <label class="filter-label">
+              <input type="checkbox" id="filter-managed" />
+              Hide managed
+            </label>
+          </div>
+          <div class="entity-count-bar">
+            <span id="entity-count" class="entity-count">0 tables</span>
+            <button class="link-btn" id="btn-select-all">Select all</button>
+          </div>
+        </div>
+        <ul class="entity-list" id="entity-list" role="listbox"></ul>
+      </aside>
+
+      <!-- Right panel -->
+      <main class="detail-panel" id="detail-panel">
+
+        <!-- Empty state -->
+        <div class="empty-state" id="empty-state">
+          <div class="empty-state__icon">&#127991;</div>
+          <p class="empty-state__title">Select a table</p>
+          <p class="empty-state__sub">Choose a table from the list on the left to browse its custom ribbon button configurations.</p>
+        </div>
+
+        <!-- Detail loading -->
+        <div class="detail-loading hidden" id="detail-loading">
+          <div class="spinner spinner--lg"></div>
+          <p>Loading ribbon buttons…</p>
+        </div>
+
+        <!-- Ribbon detail -->
+        <div class="ribbon-detail hidden" id="ribbon-detail">
+          <div class="ribbon-detail-header" id="ribbon-detail-header"></div>
+          <div class="panel-toolbar">
+            <div class="search-wrap search-wrap--sm">
+              <span class="search-icon">&#128269;</span>
+              <input type="search" id="btn-search" class="search-input" placeholder="Filter buttons…" autocomplete="off" />
+            </div>
+            <div style="flex:1"></div>
+            <span id="btn-count" class="entity-count"></span>
+            <button class="link-btn hidden" id="btn-clear-selection">Clear selection</button>
+          </div>
+          <div id="button-list" class="button-list"></div>
+        </div>
+
+      </main>
+
+    </div><!-- /app-body -->
+  </div><!-- /app -->
+
+  <!-- ── Export Modal ── -->
+  <div class="modal-overlay hidden" id="export-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Export Ribbon Buttons to CSV</h3>
+        <button class="modal-close" id="modal-close" aria-label="Close">&#215;</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-toolbar">
+          <span class="modal-toolbar-label">Select tables to include:</span>
+          <div class="modal-toolbar-actions">
+            <button class="link-btn" id="select-all-btn">All</button>
+            <span>·</span>
+            <button class="link-btn" id="select-none-btn">None</button>
+          </div>
+        </div>
+        <div class="modal-entity-list" id="modal-entity-list"></div>
+      </div>
+      <div class="modal-footer">
+        <span id="export-progress" class="export-progress"></span>
+        <button class="btn btn--secondary" id="modal-cancel-btn">Cancel</button>
+        <button class="btn btn--primary" id="modal-export-btn">Export</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── XML Viewer Modal ── -->
+  <div class="xml-modal-overlay hidden" id="xml-modal">
+    <div class="xml-modal">
+      <div class="xml-modal-header">
+        <h3 id="xml-modal-title">Button XML</h3>
+        <button class="modal-close" id="xml-modal-close">&#215;</button>
+      </div>
+      <div class="xml-modal-body" id="xml-modal-body"></div>
+      <div class="xml-modal-footer" id="xml-modal-footer"></div>
+    </div>
+  </div>
+
+  <script type="module" src="ribbon.js"></script>
+</body>
+</html>
