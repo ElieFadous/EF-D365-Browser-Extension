@@ -1,0 +1,89 @@
+{
+  "manifest_version": 3,
+  "name": "EF Power Platform Tools",
+  "short_name": "EF PPT",
+  "version": "2.2.15",
+  "description": "Power Platform utilities for Microsoft Dynamics 365 — Go To, Metadata Browser, Ribbon Buttons, Flows.",
+
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+
+  "host_permissions": [
+    "https://*.crm.dynamics.com/*",
+    "https://*.crm2.dynamics.com/*",
+    "https://*.crm3.dynamics.com/*",
+    "https://*.crm4.dynamics.com/*",
+    "https://*.crm5.dynamics.com/*",
+    "https://*.crm6.dynamics.com/*",
+    "https://*.crm7.dynamics.com/*",
+    "https://*.crm8.dynamics.com/*",
+    "https://*.crm9.dynamics.com/*",
+    "https://*.crm11.dynamics.com/*",
+    "https://*.crm12.dynamics.com/*",
+    "https://*.crm13.dynamics.com/*",
+    "https://*.crm14.dynamics.com/*",
+    "https://*.crm15.dynamics.com/*",
+    "https://*.crm16.dynamics.com/*",
+    "https://*.crm17.dynamics.com/*",
+    "https://*.crm19.dynamics.com/*",
+    "https://*.crm20.dynamics.com/*",
+    "https://*.crm21.dynamics.com/*",
+    "https://make.powerapps.com/*",
+    "https://make.powerautomate.com/*"
+  ],
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16":  "icons/icon16.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "EF Power Platform Tools"
+  },
+
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "environments.json",
+        "metadata/metadata.html",
+        "metadata/metadata.css",
+        "metadata/metadata.js",
+        "ribbon/ribbon.html",
+        "ribbon/ribbon.css",
+        "ribbon/ribbon.js",
+        "ribbon/ribbon-state.js",
+        "ribbon/ribbon-api.js",
+        "ribbon/ribbon-xml.js",
+        "ribbon/ribbon-load.js",
+        "ribbon/ribbon-render.js",
+        "ribbon/ribbon-export.js",
+        "plugin-trace/plugin-trace.html",
+        "plugin-trace/plugin-trace.css",
+        "plugin-trace/plugin-trace.js",
+        "flows/flows.html",
+        "flows/flows.css",
+        "flows/flows.js",
+        "data-sync/data-sync.html",
+        "data-sync/data-sync.css",
+        "data-sync/data-sync.js",
+        "modal/modal-shell.js"
+      ],
+      "matches": ["https://*.dynamics.com/*", "<all_urls>"]
+    }
+  ]
+}
