@@ -410,32 +410,62 @@ function bindControls() {
     closeModal();
   });
 
-  // Export.
-  document.getElementById('btn-export').addEventListener('click', () => {
-    const json = JSON.stringify({ environments }, null, 2);
+  // Export — full backup of all extension storage (environments + settings + ignored types + app cache).
+  document.getElementById('btn-export').addEventListener('click', async () => {
+    const all  = await chrome.storage.local.get(null); // get every key
+    const json = JSON.stringify(all, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
-    a.download = 'environments.json';
+    a.download = `ef-ppt-backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    showToast('Exported environments.json', 'success');
+    showToast('Full backup exported.', 'success');
   });
 
-  // Import.
+  // Import — restores whichever keys are present in the file.
+  // Supports both old single-key exports ({ environments: [...] })
+  // and new full-backup exports (all keys).
   document.getElementById('file-import').addEventListener('change', async e => {
     const file = e.target.files[0];
     if (!file) return;
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      if (!Array.isArray(data.environments)) throw new Error('Missing "environments" array in JSON.');
-      environments = data.environments;
-      await saveAndRender();
-      showToast('Environments imported successfully.', 'success');
+      if (typeof data !== 'object' || data === null) throw new Error('Invalid backup file.');
+
+      const toRestore = {};
+      const restored  = [];
+
+      if (Array.isArray(data.environments)) {
+        toRestore.environments = data.environments;
+        environments = data.environments;
+        restored.push('environments');
+      }
+      if (data.settings && typeof data.settings === 'object') {
+        toRestore.settings = data.settings;
+        settings = { ...settings, ...data.settings };
+        restored.push('settings');
+      }
+      if (Array.isArray(data.pluginTraceIgnored)) {
+        toRestore.pluginTraceIgnored = data.pluginTraceIgnored;
+        restored.push('ignored plugin types');
+      }
+      if (data.appCache && typeof data.appCache === 'object') {
+        toRestore.appCache = data.appCache;
+        restored.push('app cache');
+      }
+
+      if (Object.keys(toRestore).length === 0) {
+        throw new Error('No recognised keys found in backup file.');
+      }
+
+      await chrome.storage.local.set(toRestore);
+      renderTable();
+      renderSettingsForm();
+      showToast(`Imported: ${restored.join(', ')}.`, 'success');
     } catch (err) {
-      console.error('[EF PPT]', err);
       showToast('Import failed: ' + err.message, 'error');
     }
     // Reset so the same file can be re-imported.
