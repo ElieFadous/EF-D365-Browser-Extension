@@ -526,40 +526,17 @@ function escHtml(str) {
 
 // ─── Model Driven Apps Panel ──────────────────────────────────────────────────
 
-/** Fetch apps from a single environment via a background proxy tab. */
+/** Fetch apps from a single environment via the service worker (uses host_permissions + credentials). */
 async function _fetchMdaFromEnv(env) {
-  const apiVer = settings.apiVersion || 'v9.2';
-  const url    = `${env.url}/api/data/${apiVer}/appmodules?$select=uniquename,name&$orderby=name`;
-  let proxyTabId = null, proxyReused = false;
   try {
-    const proxyResult = await chrome.runtime.sendMessage({
-      type: 'OPEN_PROXY_TAB', env: env.url, windowId: null,
+    const result = await chrome.runtime.sendMessage({
+      type: 'FETCH_APPMODULES',
+      envUrl: env.url,
+      apiVersion: settings.apiVersion || 'v9.2',
     });
-    if (proxyResult?.error || !proxyResult?.tabId) return null;
-    proxyTabId  = proxyResult.tabId;
-    proxyReused = proxyResult.reused;
-
-    const [injection] = await chrome.scripting.executeScript({
-      target: { tabId: proxyTabId },
-      func: async (u) => {
-        try {
-          const res = await fetch(u, {
-            headers: { Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' },
-          });
-          if (!res.ok) return null;
-          const d = await res.json();
-          return (d.value ?? []).map(a => ({ uniquename: a.uniquename, name: a.name }));
-        } catch (e) { console.error('[EF PPT proxy]', e); return null; }
-      },
-      args: [url],
-    });
-    return injection?.result ?? null;
-  } catch (e) { console.error('[EF PPT]', 'Proxy tab script failed:', e); return null; }
-  finally {
-    if (proxyTabId !== null && !proxyReused) {
-      chrome.runtime.sendMessage({ type: 'CLOSE_PROXY_TAB', tabId: proxyTabId, reused: false }).catch(() => {});
-    }
-  }
+    if (result?.error || !result?.apps) return null;
+    return result.apps;
+  } catch (e) { console.error('[EF PPT]', 'FETCH_APPMODULES failed:', e); return null; }
 }
 
 /** Render the app list table from the cache. */

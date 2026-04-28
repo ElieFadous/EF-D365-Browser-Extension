@@ -222,6 +222,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .catch(e => sendResponse({ error: e.message }));
       return true;
 
+    case 'FETCH_APPMODULES': {
+      const { envUrl, apiVersion } = message;
+      const url = `${envUrl}/api/data/${apiVersion}/appmodules?$select=uniquename,name&$orderby=name`;
+      fetch(url, {
+        credentials: 'include',
+        headers: { Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' },
+      })
+        .then(res => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
+        .then(d  => sendResponse({ apps: (d.value ?? []).map(a => ({ uniquename: a.uniquename, name: a.name })) }))
+        .catch(e => sendResponse({ error: e.message }));
+      return true;
+    }
+
     default:
       return false;
   }
