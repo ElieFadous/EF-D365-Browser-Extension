@@ -1335,12 +1335,16 @@ async function fetchAllPages(path) {
   return results;
 }
 
+const _isIncognito = new URLSearchParams(location.search).get('incognito') === '1';
+
 /**
- * True when this page is running inside the EF modal (iframe in a D365 tab).
- * In that case fetch() won't have InPrivate session cookies — we relay all
- * API calls through the parent D365 tab via postMessage instead.
+ * In InPrivate modal mode, the chrome-extension:// iframe cannot access
+ * InPrivate session cookies, so fetches are relayed through the parent D365
+ * tab's content-script context (which has the right cookies) via postMessage.
+ * In regular (non-InPrivate) modal mode the iframe can fetch D365 APIs
+ * directly with credentials — no bridge needed, and cross-env queries work.
  */
-const _inModal = window.self !== window.top;
+const _usesBridge = window.self !== window.top && _isIncognito;
 
 /**
  * Sends a fetch request through the modal-shell fetch bridge (postMessage).
@@ -1376,8 +1380,7 @@ function _bridgeFetch(url, extraHeaders = {}, method = 'GET', body = null) {
  * In modal/iframe mode:   relayed through the parent D365 tab's InPrivate session.
  */
 async function d365Fetch(url) {
-  console.log('[EF PPT] GET', url);
-  if (_inModal) return _bridgeFetch(url);
+  if (_usesBridge) return _bridgeFetch(url);
   const res = await fetch(url, {
     credentials: 'include',
     headers: {

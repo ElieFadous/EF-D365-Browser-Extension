@@ -226,7 +226,7 @@
     var frame = document.createElement('iframe');
     frame.className = 'efppt-frame';
     frame.src = toolUrl;
-    frame.setAttribute('allow', 'same-origin');
+    frame.setAttribute('allow', 'same-origin; clipboard-write');
     contentArea.appendChild(frame);
     modal.appendChild(contentArea);
 
