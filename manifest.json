@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "EF Power Platform Tools",
   "short_name": "EF PPT",
-  "version": "2.2.18",
+  "version": "2.2.19",
   "description": "Power Platform utilities for Microsoft Dynamics 365 — Go To, Metadata Browser, Ribbon Buttons, Flows.",
 
   "permissions": [
