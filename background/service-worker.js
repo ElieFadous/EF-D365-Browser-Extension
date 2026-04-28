@@ -240,6 +240,13 @@ async function handleInjectTool({ tabId, toolName, toolUrl, toolTitle }) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const isIncognito = tab?.incognito ?? false;
 
+  // In InPrivate mode, tell the tool page via a URL flag so it routes fetches
+  // through the modal bridge (extension iframes can't access InPrivate cookies).
+  // In regular mode the iframe fetches D365 APIs directly — no bridge needed.
+  const effectiveUrl = isIncognito
+    ? toolUrl + (toolUrl.includes('?') ? '&' : '?') + 'incognito=1'
+    : toolUrl;
+
   // Step 1: ensure the modal shell is installed in the tab.
   // executeScript with files[] is idempotent — modal-shell.js bails immediately
   // if window.__EFPPT_Modal is already defined.
@@ -252,7 +259,7 @@ async function handleInjectTool({ tabId, toolName, toolUrl, toolTitle }) {
   await chrome.scripting.executeScript({
     target: { tabId },
     func:   function (cfg) { window.__EFPPT_Modal && window.__EFPPT_Modal.open(cfg); },
-    args:   [{ toolName, toolUrl, toolTitle, isIncognito }],
+    args:   [{ toolName, toolUrl: effectiveUrl, toolTitle, isIncognito }],
   });
 
   return { ok: true };
