@@ -181,12 +181,19 @@
           <div class="panel-header">
             <div>
               <h2 class="panel-title">Model Driven Apps</h2>
-              <p class="panel-desc">Load apps from your Dynamics 365 environments, choose a default, and select which apps appear in Go To → App.</p>
+              <p class="panel-desc">Load apps from a Dynamics 365 environment, choose a default, and select which apps appear in Go To → App.</p>
             </div>
-            <button id="btn-load-mda" class="btn btn--primary">Load Apps</button>
           </div>
 
-          <div id="mda-status" class="state-msg state-info">Click <strong>Load Apps</strong> while signed in to your Dynamics 365 environments to discover available apps.</div>
+          <div class="form-row" style="max-width:480px;margin-bottom:20px">
+            <label for="mda-env-select">Environment</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="mda-env-select" style="flex:1"></select>
+              <button id="btn-load-mda" class="btn btn--primary">Load Apps</button>
+            </div>
+          </div>
+
+          <div id="mda-status" class="state-msg state-info hidden"></div>
 
           <div id="mda-list" class="hidden">
             <!-- rows injected by JS -->

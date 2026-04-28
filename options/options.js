@@ -539,25 +539,15 @@ async function _fetchMdaFromEnv(env) {
   } catch (e) { console.error('[EF PPT]', 'FETCH_APPMODULES failed:', e); return null; }
 }
 
-/** Render the app list table from the cache. */
-function _renderMdaList(appCache) {
+/** Render the app list table from an array of apps. */
+function _renderMdaList(apps) {
   const listEl   = document.getElementById('mda-list');
   const saveRow  = document.getElementById('mda-save-row');
   const statusEl = document.getElementById('mda-status');
   listEl.innerHTML = '';
 
-  // Merge all environments' apps, tracking which env each came from.
-  const allApps = new Map(); // uniquename → { name, envUrl }
-  for (const [envUrl, apps] of Object.entries(appCache)) {
-    for (const a of apps) {
-      if (!allApps.has(a.uniquename)) {
-        allApps.set(a.uniquename, { name: a.name || a.uniquename, envUrl });
-      }
-    }
-  }
-
-  if (allApps.size === 0) {
-    statusEl.textContent = 'No model-driven apps found across configured environments. Make sure you are signed in.';
+  if (!apps || apps.length === 0) {
+    statusEl.textContent = 'No model-driven apps found. Make sure you are signed in to the selected environment.';
     statusEl.className   = 'state-msg state-warn';
     statusEl.classList.remove('hidden');
     listEl.classList.add('hidden');
@@ -565,9 +555,9 @@ function _renderMdaList(appCache) {
     return;
   }
 
-  const sorted        = [...allApps.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name));
-  const defaultApp    = settings.defaultAppUniqueName ?? '';
-  const includedApps  = Array.isArray(settings.includedApps) ? settings.includedApps : [];
+  const sorted       = [...apps].sort((a, b) => (a.name || a.uniquename).localeCompare(b.name || b.uniquename));
+  const defaultApp   = settings.defaultAppUniqueName ?? '';
+  const includedApps = Array.isArray(settings.includedApps) ? settings.includedApps : [];
 
   const table = document.createElement('table');
   table.className = 'mda-table';
@@ -584,18 +574,13 @@ function _renderMdaList(appCache) {
   `;
 
   const tbody = table.querySelector('#mda-tbody');
-  for (const [uniquename, { name, envUrl }] of sorted) {
-    const env     = environments.find(e => e.url === envUrl);
-    const envName = env?.name ?? envUrl.replace('https://', '');
+  for (const { uniquename, name } of sorted) {
     const isDefault  = uniquename === defaultApp;
     const isIncluded = includedApps.includes(uniquename);
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>
-        <div style="font-weight:600">${escHtml(name)}</div>
-        <div class="mda-load-info"><span class="mda-env-tag">${escHtml(envName)}</span></div>
-      </td>
+      <td style="font-weight:600">${escHtml(name || uniquename)}</td>
       <td class="mda-uniquename">${escHtml(uniquename)}</td>
       <td class="col-center">
         <input type="radio" name="mda-default" value="${escHtml(uniquename)}" ${isDefault ? 'checked' : ''} />
@@ -609,9 +594,7 @@ function _renderMdaList(appCache) {
     // Auto-check "Show in Go To" when this app is selected as default
     const radio = tr.querySelector('input[type="radio"]');
     const cb    = tr.querySelector('.mda-include-cb');
-    radio.addEventListener('change', () => {
-      if (radio.checked) cb.checked = true;
-    });
+    radio.addEventListener('change', () => { if (radio.checked) cb.checked = true; });
   }
 
   listEl.appendChild(table);
@@ -622,60 +605,69 @@ function _renderMdaList(appCache) {
 
 /** Wire up the MDA panel once when the tab is first opened. */
 function initMdaPanel() {
-  const statusEl = document.getElementById('mda-status');
-  const loadBtn  = document.getElementById('btn-load-mda');
-  const saveBtn  = document.getElementById('btn-save-mda');
+  const statusEl  = document.getElementById('mda-status');
+  const loadBtn   = document.getElementById('btn-load-mda');
+  const saveBtn   = document.getElementById('btn-save-mda');
+  const envSelect = document.getElementById('mda-env-select');
 
-  // If we already have a cache, render it immediately.
+  // Populate environment dropdown
+  envSelect.innerHTML = '';
+  if (environments.length === 0) {
+    envSelect.innerHTML = '<option value="">No environments configured</option>';
+    loadBtn.disabled = true;
+  } else {
+    for (const env of environments) {
+      const opt = document.createElement('option');
+      opt.value       = env.url;
+      opt.textContent = env.name;
+      envSelect.appendChild(opt);
+    }
+  }
+
+  // If we already have a cached result, render it and pre-select its environment.
   chrome.storage.local.get('appCache').then(({ appCache }) => {
-    if (appCache && Object.keys(appCache).length > 0) {
-      _renderMdaList(appCache);
+    if (appCache && appCache.envUrl && Array.isArray(appCache.apps) && appCache.apps.length > 0) {
+      envSelect.value = appCache.envUrl;
+      _renderMdaList(appCache.apps);
     }
   });
 
-  // Load button — fetches from all environments via proxy tabs.
+  // Load button — fetches from the selected environment only.
   loadBtn.addEventListener('click', async () => {
-    if (environments.length === 0) {
-      showToast('No environments configured. Add one first.', 'error');
-      return;
-    }
-    loadBtn.disabled   = true;
+    const selectedUrl = envSelect.value;
+    const env = environments.find(e => e.url === selectedUrl);
+    if (!env) return;
+
+    loadBtn.disabled    = true;
     loadBtn.textContent = 'Loading…';
-    statusEl.innerHTML  = '<span style="opacity:0.7">Connecting to environments…</span>';
+    statusEl.textContent = `Loading apps from ${env.name}…`;
     statusEl.className  = 'state-msg state-loading';
     statusEl.classList.remove('hidden');
     document.getElementById('mda-list').classList.add('hidden');
     document.getElementById('mda-save-row').classList.add('hidden');
 
-    const cache = {};
-    let reached = 0;
-    for (const env of environments) {
-      statusEl.textContent = `Loading apps from ${env.name}…`;
-      const apps = await _fetchMdaFromEnv(env);
-      if (apps && apps.length > 0) {
-        cache[env.url] = apps;
-        reached++;
-      }
-    }
-
-    await chrome.storage.local.set({ appCache: cache });
+    const apps = await _fetchMdaFromEnv(env);
 
     loadBtn.disabled    = false;
-    loadBtn.textContent = 'Reload Apps';
-    statusEl.classList.add('hidden');
-    _renderMdaList(cache);
+    loadBtn.textContent = 'Load Apps';
 
-    if (reached === 0) {
-      showToast('Could not reach any environment. Make sure you are signed in to Dynamics 365.', 'error');
-    } else {
-      showToast(`Apps loaded from ${reached} environment${reached > 1 ? 's' : ''}.`, 'success');
+    if (!apps || apps.length === 0) {
+      showToast(`Could not load apps from ${env.name}. Make sure you are signed in.`, 'error');
+      statusEl.textContent = `Could not load apps from ${env.name}. Make sure you are signed in.`;
+      statusEl.className   = 'state-msg state-warn';
+      return;
     }
+
+    await chrome.storage.local.set({ appCache: { envUrl: selectedUrl, apps } });
+    statusEl.classList.add('hidden');
+    _renderMdaList(apps);
+    showToast(`Apps loaded from ${env.name}.`, 'success');
   });
 
   // Save button
   saveBtn.addEventListener('click', async () => {
-    const defaultRadio  = document.querySelector('input[name="mda-default"]:checked');
-    const checkedBoxes  = [...document.querySelectorAll('.mda-include-cb:checked')];
+    const defaultRadio = document.querySelector('input[name="mda-default"]:checked');
+    const checkedBoxes = [...document.querySelectorAll('.mda-include-cb:checked')];
     settings.defaultAppUniqueName = defaultRadio?.value ?? '';
     settings.includedApps         = checkedBoxes.map(cb => cb.value);
     await saveSettings();
