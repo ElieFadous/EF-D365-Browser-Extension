@@ -469,7 +469,9 @@ tbody td {
 .hint { font-weight: 400; color: var(--text-muted); font-size: 11px; }
 
 .form-row input[type="text"],
-.form-row input[type="url"] {
+.form-row input[type="url"],
+.form-row input[type="number"],
+.form-row select {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
