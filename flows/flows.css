@@ -474,9 +474,19 @@ html, body {
 .exec-table colgroup col:nth-child(3) { width: 130px; }
 .exec-table colgroup col:nth-child(4) { width: 80px; }
 .exec-table colgroup col:nth-child(5) { width: auto; }
-.exec-table colgroup col:nth-child(6) { width: 40px; }
+
+.exec-table tbody tr { cursor: pointer; }
+.exec-table tbody tr:hover { background: #f0f4fb; }
+.exec-table tbody tr.selected { background: #dce8f7; }
 
 .exec-flow-name { font-weight: 500; }
+.exec-flow-link {
+  color: var(--primary);
+  font-weight: 500;
+  text-decoration: none;
+}
+.exec-flow-link:hover { text-decoration: underline; }
+
 .exec-date      { font-variant-numeric: tabular-nums; color: var(--text-muted); }
 .exec-duration  { font-variant-numeric: tabular-nums; color: var(--text-muted); }
 .exec-error     { color: #b91c1c; font-size: 11px; }
@@ -545,18 +555,6 @@ html, body {
   50%       { opacity: 0.35; }
 }
 
-/* ── Exec open link ──────────────────────────────────────────────────────────── */
-
-.exec-link {
-  display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font-size: 14px;
-  text-decoration: none;
-  transition: background 0.1s, color 0.1s;
-}
-.exec-link:hover { background: #e8edf5; color: var(--primary); }
 
 /* ── State messages ──────────────────────────────────────────────────────────── */
 

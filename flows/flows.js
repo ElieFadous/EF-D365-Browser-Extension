@@ -27,6 +27,9 @@ const _orgId             = PA_ENV_ID; // Power Platform environment ID from exte
 let _execSortKey = 'date';
 let _execSortDir = -1;   // -1 = descending, 1 = ascending
 
+// Selected execution row
+let _selectedExecId = null;
+
 const DEFAULT_SOL_KEY = `flows_defaultSol_${ENV_URL}`;
 
 // ─── Bootstrap ─────────────────────────────────────────────────────────────────
@@ -179,7 +182,6 @@ function _bridgeFetch(url, extraHeaders = {}, method = 'GET', body = null) {
  * Modal/iframe mode:   relayed through the parent D365 tab's InPrivate session.
  */
 async function _d365Fetch(url, extraHeaders = {}) {
-  console.log('[EF PPT] GET', url);
   if (_inModal) return _bridgeFetch(url, extraHeaders);
   const res = await fetch(url, {
     credentials: 'include',
@@ -322,15 +324,15 @@ async function _loadExecutions() {
     const toVal   = document.getElementById('exec-to').value;
 
     // Server-side date filter (best-effort — some environments don't honour OData
-    // filtering on flowruns.createdon; _renderExecutions also filters client-side).
+    // filtering on flowruns.starttime; _renderExecutions also filters client-side).
     const conditions = [];
-    if (fromVal) conditions.push(`createdon ge ${new Date(fromVal).toISOString()}`);
-    if (toVal)   conditions.push(`createdon le ${new Date(toVal).toISOString()}`);
+    if (fromVal) conditions.push(`starttime ge ${new Date(fromVal).toISOString()}`);
+    if (toVal)   conditions.push(`starttime le ${new Date(toVal).toISOString()}`);
 
     const filter  = conditions.length > 0 ? `&$filter=${conditions.join(' and ')}` : '';
     const execUrl = `${ENV_URL}/api/data/v9.2/flowruns` +
-      `?$select=name,workflowid,status,errorcode,createdon,duration,modifiedon` +
-      `&$orderby=createdon desc` +
+      `?$select=name,workflowid,status,errorcode,starttime,createdon,duration,modifiedon` +
+      `&$orderby=starttime desc` +
       filter;
 
     const flowIdSet = new Set(_allFlows.map(f => (f.workflowid ?? '').toLowerCase()));
@@ -452,7 +454,7 @@ function _renderExecutions() {
 
     // Client-side date filter
     if (fromDate || toDate) {
-      const d = exec.createdon ? new Date(exec.createdon) : null;
+      const d = exec.starttime ? new Date(exec.starttime) : null;
       if (d) {
         if (fromDate && d < fromDate) return false;
         if (toDate   && d > toDate)   return false;
@@ -509,8 +511,8 @@ function _renderExecutions() {
         bv = (flowMap.get((b.workflowid ?? '').toLowerCase()) ?? '').toLowerCase();
         break;
       case 'date':
-        av = a.createdon ?? '';
-        bv = b.createdon ?? '';
+        av = a.starttime ?? '';
+        bv = b.starttime ?? '';
         break;
       case 'duration':
         av = _execDurationMs(a) ?? -1;   // nulls sort to bottom
@@ -533,7 +535,7 @@ function _renderExecutions() {
   table.className = 'exec-table';
   table.innerHTML = `
     <colgroup>
-      <col><col><col><col><col><col>
+      <col><col><col><col><col>
     </colgroup>
     <thead><tr>
       <th class="exec-th" data-sort="status">Status ${_execSortIcon('status')}</th>
@@ -541,7 +543,6 @@ function _renderExecutions() {
       <th class="exec-th" data-sort="date">Date ${_execSortIcon('date')}</th>
       <th class="exec-th" data-sort="duration">Duration ${_execSortIcon('duration')}</th>
       <th class="exec-th" data-sort="error">Error ${_execSortIcon('error')}</th>
-      <th></th>
     </tr></thead>
   `;
 
@@ -565,7 +566,7 @@ function _renderExecutions() {
     const st         = _execStatus(exec);
     const flowId     = (exec.workflowid ?? '').toLowerCase();
     const flowName   = flowMap.get(flowId) ?? '—';
-    const started    = _fmtDate(exec.createdon);
+    const started    = _fmtDate(exec.starttime);
     const duration   = _fmtDurationMs(_execDurationMs(exec));
     const errFull    = exec.errorcode ?? '';
     const errPreview = errFull.length > 90 ? errFull.slice(0, 90) + '…' : errFull;
@@ -574,14 +575,25 @@ function _renderExecutions() {
       : '';
 
     const tr = document.createElement('tr');
+    if (exec.name === _selectedExecId) tr.classList.add('selected');
     tr.innerHTML = `
       <td><span class="exec-badge exec-badge--${st.cls}">${_esc(st.label)}</span></td>
-      <td class="exec-flow-name" title="${_esc(flowName)}">${_esc(flowName)}</td>
+      <td class="exec-flow-name" title="${_esc(flowName)}">
+        ${openUrl
+          ? `<a class="exec-flow-link" href="${openUrl}" target="_blank" rel="noopener noreferrer">${_esc(flowName)}</a>`
+          : _esc(flowName)}
+      </td>
       <td class="exec-date">${started}</td>
       <td class="exec-duration">${duration}</td>
       <td class="exec-error" title="${_esc(errFull)}">${_esc(errPreview)}</td>
-      ${openUrl ? `<td><a class="exec-link" href="${openUrl}" target="_blank" rel="noopener noreferrer" title="Open in Power Automate">&#8599;</a></td>` : '<td></td>'}
     `;
+
+    tr.addEventListener('click', () => {
+      _selectedExecId = exec.name === _selectedExecId ? null : exec.name;
+      tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+      if (_selectedExecId) tr.classList.add('selected');
+    });
+
     tbody.appendChild(tr);
   });
 
@@ -638,8 +650,9 @@ function _execDurationMs(exec) {
     if (!isNaN(n) && n >= 0) return n;
   }
   const status = (exec.status ?? '').toLowerCase();
-  if (exec.createdon && exec.modifiedon && status !== 'running') {
-    const ms = new Date(exec.modifiedon) - new Date(exec.createdon);
+  const start  = exec.starttime ?? exec.createdon;
+  if (start && exec.modifiedon && status !== 'running') {
+    const ms = new Date(exec.modifiedon) - new Date(start);
     if (ms > 0) return ms;
   }
   return null;
