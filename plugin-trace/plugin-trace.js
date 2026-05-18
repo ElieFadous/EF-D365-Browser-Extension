@@ -18,7 +18,7 @@ let _allLogs       = [];          // full page of results from the API
 let _filteredLogs  = [];          // after client-side text search
 let _openLogId     = null;        // currently expanded row
 let _entitySetName = null;        // resolved via EntityDefinitions on first fetch
-let _showFilter    = 'exceptions'; // 'all' | 'exceptions'
+let _showFilter    = 'all'; // 'all' | 'exceptions'
 let _ignoredTypes  = new Set();   // short plugin type names excluded from results
 let _fetchingMore  = false;       // true while paginating (more pages still in flight)
 
@@ -131,7 +131,6 @@ function _bridgeFetch(url, extraHeaders = {}, method = 'GET', body = null) {
  * Modal/iframe mode:   relayed through the parent D365 tab's InPrivate session.
  */
 async function _d365Fetch(url, extraHeaders = {}) {
-  console.log('[EF PPT] GET', url);
   if (_inModal) return _bridgeFetch(url, extraHeaders);
   const res = await fetch(url, {
     credentials: 'include',
