@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EF Power Platform Tools — Web App</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --navy:       #1B3A6B;
+    --navy-deep:  #0f2347;
+    --navy-mid:   #254e94;
+    --sky:        #3b82f6;
+    --sky-light:  #dbeafe;
+    --bg:         #f0f3f8;
+    --surface:    #ffffff;
+    --border:     #d1daea;
+    --ink:        #1a2035;
+    --muted:      #5a6a8a;
+    --success:    #15803d;
+    --warn:       #b45309;
+    --radius:     8px;
+    --radius-sm:  5px;
+  }
+
+  html { font-size: 16px; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── Header ─────────────────────────────────────────── */
+  .site-header {
+    background: var(--navy);
+    padding: 0;
+    border-bottom: 3px solid var(--navy-deep);
+  }
+
+  .header-inner {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 28px 24px 24px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .logo-mark {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    background: var(--navy-mid);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+
+  .logo-mark svg {
+    width: 26px;
+    height: 26px;
+    fill: none;
+    stroke: #fff;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .header-text { flex: 1; }
+
+  .header-text h1 {
+    color: #fff;
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  .header-text p {
+    color: rgba(255,255,255,0.62);
+    font-size: 0.8125rem;
+    margin-top: 3px;
+    letter-spacing: 0.01em;
+  }
+
+  .version-tag {
+    background: rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.75);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 20px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    align-self: flex-start;
+    margin-top: 4px;
+  }
+
+  /* ── Main layout ─────────────────────────────────────── */
+  .main {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  /* ── Cards / sections ────────────────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .card-header {
+    padding: 16px 22px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .card-header h2 {
+    font-size: 0.8125rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--navy);
+  }
+
+  .card-header .card-subtitle {
+    font-size: 0.8125rem;
+    color: var(--muted);
+  }
+
+  .card-body {
+    padding: 22px;
+  }
+
+  /* ── Steps ───────────────────────────────────────────── */
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  .step {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+
+  .step-num {
+    width: 28px;
+    height: 28px;
+    background: var(--navy);
+    color: #fff;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .step-content {}
+
+  .step-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 8px;
+  }
+
+  .step-body {
+    font-size: 0.875rem;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  /* ── Bookmarklet pill ────────────────────────────────── */
+  .bookmarklet-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .bookmarklet-instruction {
+    font-size: 0.8125rem;
+    color: var(--muted);
+  }
+
+  .bookmarklet-stage {
+    background: var(--bg);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  /* The actual draggable bookmark */
+  .bookmarklet-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--sky);
+    color: #fff;
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 600;
+    padding: 9px 18px 9px 12px;
+    border-radius: 6px;
+    border: none;
+    cursor: grab;
+    user-select: none;
+    box-shadow:
+      0 2px 6px rgba(59,130,246,0.4),
+      0 1px 2px rgba(0,0,0,0.15),
+      inset 0 1px 0 rgba(255,255,255,0.2);
+    transition: box-shadow 0.15s, transform 0.1s, background 0.15s;
+    position: relative;
+    /* Bookmark tab notch effect via border-radius tweak */
+    border-radius: 6px 6px 6px 6px;
+    outline-offset: 3px;
+  }
+
+  .bookmarklet-link::before {
+    /* Small tab ear at top right */
+    content: '';
+    position: absolute;
+    top: -5px;
+    right: 14px;
+    width: 20px;
+    height: 6px;
+    background: var(--sky);
+    border-radius: 3px 3px 0 0;
+    box-shadow: 0 -1px 2px rgba(59,130,246,0.3);
+  }
+
+  .bookmarklet-link:hover {
+    background: #2563eb;
+    box-shadow:
+      0 4px 12px rgba(59,130,246,0.45),
+      0 1px 3px rgba(0,0,0,0.2),
+      inset 0 1px 0 rgba(255,255,255,0.2);
+    transform: translateY(-1px);
+  }
+
+  .bookmarklet-link:hover::before {
+    background: #2563eb;
+  }
+
+  .bookmarklet-link:active {
+    cursor: grabbing;
+    transform: translateY(0);
+  }
+
+  .bookmarklet-link:focus-visible {
+    outline: 2px solid var(--sky);
+  }
+
+  .bm-icon {
+    width: 18px;
+    height: 18px;
+    background: rgba(255,255,255,0.25);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .bm-icon svg {
+    width: 11px;
+    height: 11px;
+    fill: #fff;
+  }
+
+  .drag-hint {
+    font-size: 0.75rem;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .drag-hint svg {
+    width: 14px;
+    height: 14px;
+    opacity: 0.6;
+  }
+
+  /* ── Config section ──────────────────────────────────── */
+  .config-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+    line-height: 1;
+    outline-offset: 3px;
+  }
+
+  .btn:focus-visible { outline: 2px solid var(--sky); }
+
+  .btn-primary {
+    background: var(--navy);
+    color: #fff;
+    border-color: var(--navy-deep);
+  }
+  .btn-primary:hover { background: var(--navy-deep); }
+
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--ink);
+    border-color: var(--border);
+  }
+  .btn-secondary:hover { background: var(--bg); border-color: #b0bcd4; }
+
+  .btn svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+  }
+
+  .config-textarea {
+    width: 100%;
+    height: 400px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--ink);
+    background: #f7f9fc;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    resize: vertical;
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+    outline-offset: 2px;
+    transition: border-color 0.15s;
+  }
+
+  .config-textarea:focus {
+    outline: none;
+    border-color: var(--sky);
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+  }
+
+  .config-note {
+    margin-top: 12px;
+    font-size: 0.78125rem;
+    color: var(--muted);
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    line-height: 1.5;
+  }
+
+  .config-note svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    opacity: 0.7;
+  }
+
+  /* status toast */
+  .toast {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    padding: 7px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid;
+  }
+  .toast.show { display: inline-flex; }
+  .toast.ok   { color: var(--success); background: #f0fdf4; border-color: #bbf7d0; }
+  .toast.err  { color: #991b1b;        background: #fef2f2; border-color: #fecaca; }
+
+  /* hidden file input */
+  #import-input { display: none; }
+
+  /* ── How it works ────────────────────────────────────── */
+  .how-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  @media (max-width: 560px) {
+    .how-grid { grid-template-columns: 1fr; }
+  }
+
+  .how-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+  }
+
+  .how-item h3 {
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: var(--navy);
+    margin-bottom: 6px;
+    letter-spacing: 0.01em;
+  }
+
+  .how-item p {
+    font-size: 0.8125rem;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.875em;
+    background: #edf1f8;
+    color: var(--navy);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* ── Footer ──────────────────────────────────────────── */
+  .site-footer {
+    text-align: center;
+    padding: 20px 24px 32px;
+    font-size: 0.78125rem;
+    color: var(--muted);
+  }
+
+  .site-footer a {
+    color: var(--sky);
+    text-decoration: none;
+  }
+  .site-footer a:hover { text-decoration: underline; }
+
+  /* Divider */
+  hr.section-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────── -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo-mark" aria-hidden="true">
+      <!-- Lightning bolt -->
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+      </svg>
+    </div>
+    <div class="header-text">
+      <h1>EF Power Platform Tools</h1>
+      <p>Browser Extension Alternative &mdash; GitHub Pages Edition</p>
+    </div>
+    <span class="version-tag">Web App</span>
+  </div>
+</header>
+
+<!-- ── Main ────────────────────────────────────────────── -->
+<main class="main">
+
+  <!-- Quick Start -->
+  <section class="card" aria-labelledby="quickstart-heading">
+    <div class="card-header">
+      <h2 id="quickstart-heading">Quick Start</h2>
+      <span class="card-subtitle">Three steps to get running</span>
+    </div>
+    <div class="card-body">
+      <div class="steps">
+
+        <!-- Step 1 -->
+        <div class="step">
+          <div class="step-num" aria-hidden="true">1</div>
+          <div class="step-content">
+            <div class="step-label">Drag this bookmark to your bookmark bar</div>
+            <div class="bookmarklet-wrapper">
+              <div class="bookmarklet-stage">
+                <!-- The bookmarklet link — href set by JS to keep the source readable -->
+                <a id="bookmarklet-link"
+                   class="bookmarklet-link"
+                   href="#"
+                   title="Drag me to your bookmark bar"
+                   draggable="true">
+                  <span class="bm-icon" aria-hidden="true">
+                    <!-- Star/bookmark icon -->
+                    <svg viewBox="0 0 12 12"><path d="M6 1l1.4 3h3l-2.4 1.8.9 3L6 7.1 3.1 8.8l.9-3L1.6 4h3z"/></svg>
+                  </span>
+                  EF PPT Launcher
+                </a>
+                <span class="drag-hint" aria-hidden="true">
+                  <!-- Arrow left -->
+                  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M9 7H3m0 0 3-3m-3 3 3 3"/>
+                  </svg>
+                  drag to bookmark bar
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="step">
+          <div class="step-num" aria-hidden="true">2</div>
+          <div class="step-content">
+            <div class="step-label">Navigate to any Dynamics 365 page and click the bookmark</div>
+            <div class="step-body">
+              The launcher injects itself into the D365 page context, giving it
+              full access to the same-origin API. A floating panel will appear.
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="step">
+          <div class="step-num" aria-hidden="true">3</div>
+          <div class="step-content">
+            <div class="step-label">Configure your environments on first run</div>
+            <div class="step-body">
+              Add your environment URLs and names below, then save.
+              You can also reach this from the <strong>&#9881;</strong> settings
+              icon inside the launcher panel at any time.
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="card" aria-labelledby="how-heading">
+    <div class="card-header">
+      <h2 id="how-heading">How It Works</h2>
+    </div>
+    <div class="card-body">
+      <div class="how-grid">
+        <div class="how-item">
+          <h3>Bookmarklet launcher</h3>
+          <p>
+            Clicking the bookmark appends <code>launcher.js</code> (hosted here
+            on GitHub Pages) to the D365 document. It runs in the D365 origin,
+            so all API calls are same-origin with credentials included.
+          </p>
+        </div>
+        <div class="how-item">
+          <h3>Tool iframes</h3>
+          <p>
+            Each tool opens as an iframe served from <code>github.io</code>.
+            To reach D365 APIs they send a <code>postMessage</code> to the
+            launcher, which relays the fetch and posts the result back.
+          </p>
+        </div>
+        <div class="how-item">
+          <h3>No extension required</h3>
+          <p>
+            No Chrome extension, no admin approval, no service worker.
+            The only browser permission needed is the ability to save a
+            bookmark — which every browser already allows.
+          </p>
+        </div>
+        <div class="how-item">
+          <h3>Config in localStorage</h3>
+          <p>
+            All environment config is stored in your browser's
+            <code>localStorage</code> under <code>ef_ppt_config</code>.
+            Nothing is sent to any server. Export to keep a backup.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Configuration -->
+  <section class="card" aria-labelledby="config-heading">
+    <div class="card-header">
+      <h2 id="config-heading">Configuration</h2>
+      <span class="card-subtitle">Environments &amp; settings</span>
+    </div>
+    <div class="card-body">
+      <div class="config-actions">
+        <button class="btn btn-primary" id="save-btn" type="button">
+          <!-- Save icon -->
+          <svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 11V4l3-3h5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/>
+            <path d="M5 1v3h4"/>
+            <rect x="3.5" y="7" width="6" height="4" rx="0.5"/>
+          </svg>
+          Save Config
+        </button>
+        <button class="btn btn-secondary" id="export-btn" type="button">
+          <!-- Download icon -->
+          <svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6.5 1v8M4 7l2.5 2.5L9 7"/>
+            <path d="M2 11h9"/>
+          </svg>
+          Export
+        </button>
+        <label class="btn btn-secondary" for="import-input" style="cursor:pointer;">
+          <!-- Upload icon -->
+          <svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6.5 9V1M4 3l2.5-2.5L9 3"/>
+            <path d="M2 11h9"/>
+          </svg>
+          Import
+        </label>
+        <input type="file" id="import-input" accept=".json,application/json">
+        <span class="toast" id="save-toast" role="status" aria-live="polite">
+          <!-- Check -->
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 6l3 3 5-5"/></svg>
+          Saved
+        </span>
+      </div>
+
+      <textarea
+        class="config-textarea"
+        id="config-textarea"
+        spellcheck="false"
+        aria-label="Configuration JSON"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+      ></textarea>
+
+      <p class="config-note">
+        <svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="6.5" cy="6.5" r="5"/>
+          <path d="M6.5 6v3.5M6.5 4h.01"/>
+        </svg>
+        Config is stored only in your browser&rsquo;s localStorage &mdash; never sent anywhere.
+        Use Export to back it up, then Import to restore it in another browser or profile.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── Footer ──────────────────────────────────────────── -->
+<footer class="site-footer">
+  <a href="https://github.com/eliefadous/EF-D365-Browser-Extension" target="_blank" rel="noopener">
+    EF-D365-Browser-Extension on GitHub
+  </a>
+  &nbsp;&middot;&nbsp;
+  Config stored locally in your browser only
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── Bookmarklet href ──────────────────────────────────── */
+  var BOOKMARKLET = "javascript:(function(){if(window.__EF_PPT_LAUNCHER)return;var s=document.createElement('script');s.src='https://eliefadous.github.io/EF-D365-Browser-Extension/web-app/launcher.js?v='+Date.now();s.onerror=function(){alert('Could not load EF PPT. Check your connection.');};document.head.appendChild(s);})();";
+  document.getElementById('bookmarklet-link').href = BOOKMARKLET;
+
+  /* ── Starter template ──────────────────────────────────── */
+  var STARTER = {
+    environments: [
+      {
+        id: "dev_crm4",
+        name: "DEV",
+        url: "https://yourorg-dev.crm4.dynamics.com",
+        color: "#2563eb",
+        powerAppsId: ""
+      },
+      {
+        id: "prod_crm4",
+        name: "PROD",
+        url: "https://yourorg.crm4.dynamics.com",
+        color: "#b91c1c",
+        warn: true,
+        powerAppsId: ""
+      }
+    ],
+    settings: {
+      apiVersion: "v9.2",
+      defaultAppUniqueName: "",
+      includedApps: []
+    }
+  };
+
+  var CONFIG_KEY = 'ef_ppt_config';
+  var textarea   = document.getElementById('config-textarea');
+  var toast      = document.getElementById('save-toast');
+  var toastTimer = null;
+
+  /* ── Load existing config or starter ──────────────────── */
+  function loadConfig() {
+    try {
+      var raw = localStorage.getItem(CONFIG_KEY);
+      if (raw) {
+        // Pretty-print whatever is stored
+        var parsed = JSON.parse(raw);
+        textarea.value = JSON.stringify(parsed, null, 2);
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    textarea.value = JSON.stringify(STARTER, null, 2);
+  }
+
+  /* ── Save ──────────────────────────────────────────────── */
+  document.getElementById('save-btn').addEventListener('click', function () {
+    var val = textarea.value.trim();
+    try {
+      var parsed = JSON.parse(val);
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(parsed));
+      textarea.value = JSON.stringify(parsed, null, 2);
+      showToast(true, 'Saved');
+    } catch (e) {
+      showToast(false, 'Invalid JSON — check syntax');
+    }
+  });
+
+  /* ── Export ────────────────────────────────────────────── */
+  document.getElementById('export-btn').addEventListener('click', function () {
+    var val = textarea.value.trim();
+    var blob;
+    try {
+      var parsed = JSON.parse(val);
+      blob = new Blob([JSON.stringify(parsed, null, 2)], { type: 'application/json' });
+    } catch (e) {
+      // Export as-is if parse fails
+      blob = new Blob([val], { type: 'application/json' });
+    }
+    var url = URL.createObjectURL(blob);
+    var a   = document.createElement('a');
+    a.href  = url;
+    a.download = 'ef-ppt-config.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  });
+
+  /* ── Import ────────────────────────────────────────────── */
+  document.getElementById('import-input').addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var parsed = JSON.parse(ev.target.result);
+        textarea.value = JSON.stringify(parsed, null, 2);
+        showToast(true, 'Imported — click Save to apply');
+      } catch (err) {
+        showToast(false, 'Could not parse JSON file');
+      }
+    };
+    reader.readAsText(file);
+    // Reset so the same file can be re-imported
+    e.target.value = '';
+  });
+
+  /* ── Toast helper ──────────────────────────────────────── */
+  function showToast(ok, msg) {
+    toast.className = 'toast show ' + (ok ? 'ok' : 'err');
+    // Update text content (after the SVG icon)
+    var nodes = toast.childNodes;
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].nodeType === 3) { nodes[i].textContent = ' ' + msg; break; }
+    }
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toast.className = 'toast'; }, 3500);
+  }
+
+  /* ── Init ──────────────────────────────────────────────── */
+  loadConfig();
+})();
+</script>
+
+</body>
+</html>

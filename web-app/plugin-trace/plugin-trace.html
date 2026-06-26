@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plugin Trace Logs — EF Power Platform Tools</title>
+  <link rel="stylesheet" href="plugin-trace.css" />
+</head>
+<body>
+
+  <!-- ── Header ── -->
+  <header class="pt-header">
+    <div class="pt-header__brand">
+      <div class="pt-logo">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true">
+          <path fill-rule="evenodd" fill="#fff" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+          <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+        </svg>
+      </div>
+      <div class="pt-header__titles">
+        <span class="pt-header__title">Plugin Trace Logs</span>
+        <span id="env-name" class="pt-header__sub">Loading&hellip;</span>
+      </div>
+    </div>
+    <button id="btn-refresh" class="pt-icon-btn" title="Refresh">&#8635;</button>
+  </header>
+
+  <!-- ── Toolbar ── -->
+  <div class="pt-toolbar">
+    <div class="pt-search-wrap">
+      <svg class="pt-search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="8.5" cy="8.5" r="5.5"/><path d="M13.5 13.5 L18 18"/>
+      </svg>
+      <input type="text" id="search" placeholder="Search plugin type or message&hellip;" autocomplete="off" spellcheck="false" />
+    </div>
+    <label class="pt-date-field">
+      <span class="pt-date-label">From</span>
+      <input type="datetime-local" id="filter-from" />
+    </label>
+    <label class="pt-date-field">
+      <span class="pt-date-label">To</span>
+      <input type="datetime-local" id="filter-to" />
+    </label>
+    <div class="pt-seg" role="group" aria-label="Show">
+      <button class="pt-seg__btn active" data-filter="all">All</button>
+      <button class="pt-seg__btn" data-filter="exceptions">Exceptions only</button>
+    </div>
+    <div class="pt-toolbar__actions">
+      <button id="btn-apply" class="pt-btn pt-btn--primary">Apply</button>
+      <button id="btn-clear" class="pt-btn pt-btn--ghost">Clear</button>
+    </div>
+  </div>
+
+  <!-- ── Results info bar ── -->
+  <div id="results-info" class="pt-results-info hidden"></div>
+
+  <!-- ── Log list ── -->
+  <div id="log-list" class="pt-log-list">
+    <!-- rows injected by plugin-trace.js -->
+  </div>
+
+  <script src="plugin-trace.js"></script>
+</body>
+</html>

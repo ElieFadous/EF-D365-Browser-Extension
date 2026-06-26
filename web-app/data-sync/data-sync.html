@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Data Sync — EF Power Platform Tools</title>
+  <link rel="stylesheet" href="data-sync.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- ── Header ── -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="header-logo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true">
+            <path fill-rule="evenodd" fill="#fff" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+            <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+          </svg>
+        </div>
+        <div class="header-titles">
+          <span class="header-title">Data Sync</span>
+          <span class="header-sub">Synchronise records between environments</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── Step Indicator ── -->
+    <div class="stepper" id="stepper" aria-label="Progress">
+      <div class="step active" data-step="1">
+        <div class="step-circle">1</div>
+        <span class="step-label">Environments</span>
+      </div>
+      <div class="step-connector"></div>
+      <div class="step" data-step="2">
+        <div class="step-circle">2</div>
+        <span class="step-label">Table</span>
+      </div>
+      <div class="step-connector"></div>
+      <div class="step" data-step="3">
+        <div class="step-circle">3</div>
+        <span class="step-label">Columns</span>
+      </div>
+      <div class="step-connector"></div>
+      <div class="step" data-step="4">
+        <div class="step-circle">4</div>
+        <span class="step-label">Filter</span>
+      </div>
+      <div class="step-connector"></div>
+      <div class="step" data-step="5">
+        <div class="step-circle">5</div>
+        <span class="step-label">Results</span>
+      </div>
+    </div>
+
+    <!-- ── Step Summary Breadcrumb ── -->
+    <div id="step-summary" class="step-summary hidden" aria-label="Selection summary"></div>
+
+    <!-- ── Main content ── -->
+    <div class="content" id="content">
+
+      <!-- ── Step 1: Environments ── -->
+      <div class="step-panel active" id="panel-1">
+        <h2 class="panel-title">Select Environments</h2>
+        <p class="panel-desc">Choose the source environment to read records from, and the target environment to sync into.</p>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="source-env">Source Environment</label>
+            <select id="source-env" class="select">
+              <option value="">— Select source —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="target-env">Target Environment</label>
+            <select id="target-env" class="select">
+              <option value="">— Select target —</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="env-error" class="alert alert--error hidden"></div>
+      </div>
+
+      <!-- ── Step 2: Table ── -->
+      <div class="step-panel" id="panel-2">
+        <h2 class="panel-title">Select Table</h2>
+        <p class="panel-desc">Choose the entity table to synchronise. Only customisable tables are listed.</p>
+
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6.5" cy="6.5" r="4"/><line x1="9.5" y1="9.5" x2="14" y2="14"/></svg>
+          <input type="search" id="table-search" class="search-input" placeholder="Search tables…" autocomplete="off" />
+        </div>
+
+        <div id="table-list-wrap" class="list-wrap">
+          <div id="table-list-state" class="state-msg state-loading">
+            <span class="spinner"></span> Loading tables…
+          </div>
+          <ul id="table-list" class="item-list hidden" role="listbox" aria-label="Tables"></ul>
+        </div>
+      </div>
+
+      <!-- ── Step 3: Columns & N:N ── -->
+      <div class="step-panel" id="panel-3">
+        <h2 class="panel-title">Select Columns &amp; Relationships</h2>
+        <p class="panel-desc">Choose which columns and many-to-many relationships to include in the sync.</p>
+
+        <div class="two-col-panels">
+
+          <!-- Columns -->
+          <div class="col-panel">
+            <div class="col-panel-header">
+              <span class="col-panel-title">Columns</span>
+              <div class="col-panel-actions">
+                <button id="btn-cols-all"   class="link-btn">All</button>
+                <span class="dot-sep">&middot;</span>
+                <button id="btn-cols-clear" class="link-btn">Clear</button>
+              </div>
+            </div>
+            <div class="search-wrap search-wrap--sm">
+              <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6.5" cy="6.5" r="4"/><line x1="9.5" y1="9.5" x2="14" y2="14"/></svg>
+              <input type="search" id="cols-search" class="search-input" placeholder="Search columns…" autocomplete="off" />
+            </div>
+            <div id="cols-state" class="state-msg state-loading">
+              <span class="spinner"></span> Loading…
+            </div>
+            <ul id="cols-list" class="check-list hidden"></ul>
+          </div>
+
+          <!-- N:N Relationships -->
+          <div class="col-panel">
+            <div class="col-panel-header">
+              <span class="col-panel-title">N:N Relationships</span>
+              <div class="col-panel-actions">
+                <button id="btn-m2m-all"   class="link-btn">All</button>
+                <span class="dot-sep">&middot;</span>
+                <button id="btn-m2m-clear" class="link-btn">Clear</button>
+              </div>
+            </div>
+            <div id="m2m-state" class="state-msg state-info hidden">No N:N relationships found for this entity.</div>
+            <ul id="m2m-list" class="check-list hidden"></ul>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ── Step 4: Filter ── -->
+      <div class="step-panel" id="panel-4">
+        <h2 class="panel-title">Configure Filter</h2>
+        <p class="panel-desc">Optionally add filter conditions. Leave empty to sync all records in the table.</p>
+
+        <div class="filter-logic-row">
+          <label for="filter-logic">Match</label>
+          <select id="filter-logic" class="select select--sm">
+            <option value="and">All conditions (AND)</option>
+            <option value="or">Any condition (OR)</option>
+          </select>
+        </div>
+
+        <div id="filter-conditions" class="filter-conditions"></div>
+
+        <button id="btn-add-condition" class="btn btn--secondary btn--sm">+ Add Condition</button>
+
+        <details id="fetchxml-preview" class="fetchxml-preview">
+          <summary class="fetchxml-summary">FetchXML Preview</summary>
+          <pre id="fetchxml-code" class="fetchxml-code"></pre>
+        </details>
+      </div>
+
+      <!-- ── Step 5: Results ── -->
+      <div class="step-panel" id="panel-5">
+        <h2 class="panel-title" id="results-title">Results</h2>
+
+        <!-- Progress view (shown during sync) -->
+        <div id="progress-view" class="hidden">
+          <div class="progress-bar-wrap">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <div class="progress-status" id="progress-status">Preparing…</div>
+        </div>
+
+        <!-- Warning banner (shown if record count exceeds threshold) -->
+        <div id="count-warning" class="alert alert--warning hidden">
+          <span id="count-warning-msg"></span>
+          <div class="alert-actions">
+            <button id="btn-warning-continue" class="btn btn--primary btn--sm">Continue</button>
+            <button id="btn-warning-cancel"   class="btn btn--secondary btn--sm">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Preview table (View Updates) -->
+        <div id="preview-view" class="hidden">
+          <div class="results-toolbar">
+            <span class="results-stats" id="preview-stats"></span>
+          </div>
+          <div class="table-wrap">
+            <table id="preview-table" class="results-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Record ID</th>
+                  <th>Source</th>
+                  <th>Target</th>
+                </tr>
+              </thead>
+              <tbody id="preview-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Summary table (after sync) -->
+        <div id="summary-view" class="hidden">
+          <div class="results-toolbar">
+            <span class="results-stats" id="summary-stats"></span>
+            <div class="results-filters">
+              <div class="search-wrap search-wrap--sm">
+                <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6.5" cy="6.5" r="4"/><line x1="9.5" y1="9.5" x2="14" y2="14"/></svg>
+                <input type="search" id="summary-search" class="search-input" placeholder="Search…" autocomplete="off" />
+              </div>
+              <select id="summary-status-filter" class="select select--sm">
+                <option value="">All</option>
+                <option value="success">Success</option>
+                <option value="failed">Failed</option>
+              </select>
+              <button id="btn-export-csv" class="btn btn--secondary btn--sm">Export CSV</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="summary-table" class="results-table">
+              <thead>
+                <tr>
+                  <th class="sortable" data-col="name">Name <span class="sort-arrow">&#8597;</span></th>
+                  <th class="sortable" data-col="id">Record ID <span class="sort-arrow">&#8597;</span></th>
+                  <th class="sortable" data-col="status">Status <span class="sort-arrow">&#8597;</span></th>
+                  <th>Source</th>
+                  <th>Target</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody id="summary-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div><!-- /panel-5 -->
+
+    </div><!-- /content -->
+
+    <!-- ── Sticky footer navigation ── -->
+    <footer class="wizard-footer" id="wizard-footer">
+      <!-- Group 1: Back + Next (navigation) -->
+      <button id="btn-step2-back"        class="btn btn--secondary footer-btn hidden">&lsaquo; Back</button>
+      <button id="btn-step3-back"        class="btn btn--secondary footer-btn hidden">&lsaquo; Back</button>
+      <button id="btn-step4-back"        class="btn btn--secondary footer-btn hidden">&lsaquo; Back</button>
+      <button id="btn-back-from-preview" class="btn btn--secondary footer-btn hidden">&lsaquo; Back to Filter</button>
+      <button id="btn-step1-next"        class="btn btn--primary   footer-btn hidden" disabled>Next &rsaquo;</button>
+      <button id="btn-step2-next"        class="btn btn--primary   footer-btn hidden" disabled>Next &rsaquo;</button>
+      <button id="btn-step3-next"        class="btn btn--primary   footer-btn hidden">Next &rsaquo;</button>
+
+      <!-- Separator: shown only when action buttons are also visible -->
+      <span class="footer-sep hidden" id="footer-sep-actions"></span>
+
+      <!-- Group 2: Action buttons (step 4 & 5) -->
+      <button id="btn-view-updates"      class="btn btn--secondary footer-btn hidden">View Updates</button>
+      <button id="btn-sync"              class="btn btn--primary   footer-btn hidden">Sync &rsaquo;</button>
+      <button id="btn-sync-from-preview" class="btn btn--primary   footer-btn hidden">Sync &rsaquo;</button>
+      <button id="btn-new-sync"          class="btn btn--secondary footer-btn hidden">&#8635; New Sync</button>
+
+      <!-- Always-visible separator + Reset -->
+      <span class="footer-sep"></span>
+      <button id="btn-reset"             class="btn btn--ghost     footer-btn">&#8635; Reset</button>
+    </footer>
+
+  </div><!-- /app -->
+
+  <script src="data-sync.js"></script>
+</body>
+</html>
