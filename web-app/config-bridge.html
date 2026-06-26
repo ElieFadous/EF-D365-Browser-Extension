@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"></head>
+<script>
+(function () {
+  'use strict';
+  var CONFIG_KEY = 'ef_ppt_config';
+
+  function getConfig() {
+    try {
+      var raw = localStorage.getItem(CONFIG_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  // On load: immediately send config to parent (launcher.js waiting for this).
+  window.parent.postMessage({ __efppt: 'config-loaded', config: getConfig() }, '*');
+
+  // Listen for save requests from launcher.js.
+  window.addEventListener('message', function (e) {
+    if (!e.data || e.data.__efppt !== 'config-save') return;
+    try {
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(e.data.config));
+      if (e.source && e.source.postMessage) {
+        e.source.postMessage({ __efppt: 'config-saved', ok: true }, '*');
+      }
+    } catch (err) {
+      if (e.source && e.source.postMessage) {
+        e.source.postMessage({ __efppt: 'config-saved', ok: false, error: String(err) }, '*');
+      }
+    }
+  });
+})();
+</script>
+</html>
