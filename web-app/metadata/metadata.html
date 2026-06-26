@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EF Power Platform Tools — Metadata Browser</title>
+  <link rel="stylesheet" href="metadata.css" />
+</head>
+<body>
+
+  <!-- ── App shell ── -->
+  <div class="app" id="app">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="app-header__brand">
+        <div class="app-logo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true">
+            <path fill-rule="evenodd" fill="#fff" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+            <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+          </svg>
+        </div>
+        <div>
+          <span class="app-title">Metadata Browser</span>
+          <span class="app-sub">EF Power Platform Tools</span>
+        </div>
+      </div>
+      <div class="app-header__env">
+        <span class="env-dot" id="env-dot"></span>
+        <span class="env-label" id="env-name">—</span>
+        <span class="env-url-label" id="env-url"></span>
+      </div>
+    </header>
+
+    <!-- Global loading / error overlays -->
+    <div class="global-overlay" id="global-loading">
+      <div class="global-overlay__box">
+        <div class="spinner spinner--lg"></div>
+        <p id="loading-text">Loading…</p>
+      </div>
+    </div>
+    <div class="global-overlay hidden" id="global-error">
+      <div class="global-overlay__box global-overlay__box--error">
+        <div class="error-icon">!</div>
+        <p id="error-text"></p>
+        <a id="env-link" href="#" target="_blank" class="btn btn--primary" style="margin-top:12px">Open Environment</a>
+      </div>
+    </div>
+
+    <!-- Two-pane body -->
+    <div class="app-body" id="app-body" style="display:none">
+
+      <!-- ── Left sidebar ── -->
+      <aside class="sidebar">
+
+        <!-- Sidebar type tabs: Tables / Option Sets -->
+        <div class="sidebar-tabs">
+          <button class="sidebar-tab active" data-list="entities">
+            Tables <span class="tab-count" id="sidebar-count-entities">0</span>
+          </button>
+          <button class="sidebar-tab" data-list="optionsets">
+            Option Sets <span class="tab-count" id="sidebar-count-optionsets">0</span>
+          </button>
+        </div>
+
+        <!-- Search + filters (shared, labels update per tab) -->
+        <div class="sidebar-top">
+          <div class="search-wrap">
+            <span class="search-icon">&#128269;</span>
+            <input type="search" id="search-input" class="search-input" placeholder="Search tables…" autocomplete="off" />
+          </div>
+          <div class="sidebar-filters" id="sidebar-filters-entities">
+            <label class="filter-label">
+              <input type="checkbox" id="filter-custom" />
+              Custom only
+            </label>
+            <label class="filter-label">
+              <input type="checkbox" id="filter-managed" />
+              Hide managed
+            </label>
+            <label class="filter-label">
+              <input type="checkbox" id="filter-intersect" checked />
+              Exclude intersects
+            </label>
+            <label class="filter-label">
+              <input type="checkbox" id="filter-adx" checked />
+              Exclude adx tables
+            </label>
+          </div>
+          <div class="sidebar-filters hidden" id="sidebar-filters-optionsets">
+            <label class="filter-label">
+              <input type="checkbox" id="filter-os-custom" />
+              Custom only
+            </label>
+            <label class="filter-label">
+              <input type="checkbox" id="filter-os-managed" />
+              Hide managed
+            </label>
+          </div>
+          <div class="entity-count-bar">
+            <span id="entity-count" class="entity-count">0</span>
+          </div>
+        </div>
+
+        <!-- Entity list -->
+        <ul class="entity-list" id="entity-list" role="listbox"></ul>
+
+        <!-- Option Set list (hidden until tab selected) -->
+        <ul class="entity-list hidden" id="optionset-list" role="listbox"></ul>
+
+      </aside>
+
+      <!-- ── Right panel: entity detail ── -->
+      <main class="detail-panel" id="detail-panel">
+
+        <!-- Entity tabs bar (one tab per open table) -->
+        <div id="entity-tabs-bar" class="entity-tabs-bar hidden" role="tablist" aria-label="Open tables"></div>
+
+        <!-- Empty state -->
+        <div class="empty-state" id="empty-state">
+          <div class="empty-state__icon">&#128196;</div>
+          <p class="empty-state__title">Select a table</p>
+          <p class="empty-state__sub">Choose a table from the list on the left to browse its columns and relationships.</p>
+        </div>
+
+        <!-- Loading state for detail -->
+        <div class="detail-loading hidden" id="detail-loading">
+          <div class="spinner spinner--lg"></div>
+          <p>Loading table metadata…</p>
+        </div>
+
+        <!-- Entity detail content -->
+        <div class="entity-detail hidden" id="entity-detail">
+
+          <!-- Entity info header -->
+          <div class="entity-header" id="entity-header">
+            <!-- Injected by JS -->
+          </div>
+
+          <!-- Detail tabs -->
+          <div class="detail-tabs" role="tablist">
+            <button class="detail-tab active" data-panel="columns" role="tab">
+              Columns <span class="tab-count" id="tab-count-columns"></span>
+            </button>
+            <button class="detail-tab" data-panel="relationships" role="tab">
+              Relationships <span class="tab-count" id="tab-count-rels"></span>
+            </button>
+          </div>
+
+          <!-- Columns panel -->
+          <div id="panel-columns" class="panel-content">
+            <div class="panel-toolbar">
+              <div class="search-wrap search-wrap--sm">
+                <span class="search-icon">&#128269;</span>
+                <input type="search" id="col-search" class="search-input" placeholder="Filter columns…" autocomplete="off" />
+              </div>
+              <label class="filter-label">
+                <input type="checkbox" id="col-hide-system" checked />
+                Hide system fields
+              </label>
+              <label class="filter-label">
+                <input type="checkbox" id="col-hide-managed" />
+                Hide managed
+              </label>
+              <div style="flex:1"></div>
+              <span id="col-count" class="entity-count"></span>
+            </div>
+
+            <div class="table-wrap" id="col-table-wrap">
+              <table class="data-table" id="col-table">
+                <colgroup>
+                  <col style="width:16%">
+                  <col style="width:16%">
+                  <col style="width:13%">
+                  <col style="width:5%">
+                  <col style="width:45%">
+                  <col style="width:5%">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th class="col-th" data-sort="display">Display Name <span class="sort-icon"></span></th>
+                    <th class="col-th" data-sort="logical">Logical Name <span class="sort-icon"></span></th>
+                    <th class="col-th" data-sort="schema">Schema Name <button class="col-th-info" aria-label="About schema name">ⓘ</button><span class="sort-icon"></span></th>
+                    <th class="col-th" data-sort="type">Type <span class="sort-icon"></span></th>
+                    <th class="col-th col-th--details">Details</th>
+                    <th class="col-th" data-sort="req">Required <span class="sort-icon"></span></th>
+                  </tr>
+                </thead>
+                <tbody id="col-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Relationships panel -->
+          <div id="panel-relationships" class="panel-content hidden">
+            <div class="rel-tabs" role="tablist">
+              <button class="rel-tab active" data-rel="1n" role="tab">
+                1 : N <span class="tab-count" id="tab-count-1n"></span>
+              </button>
+              <button class="rel-tab" data-rel="n1" role="tab">
+                N : 1 <span class="tab-count" id="tab-count-n1"></span>
+              </button>
+              <button class="rel-tab" data-rel="nn" role="tab">
+                N : N <span class="tab-count" id="tab-count-nn"></span>
+              </button>
+            </div>
+            <div class="panel-toolbar" id="rel-toolbar">
+              <div class="search-wrap search-wrap--sm">
+                <span class="search-icon">&#128269;</span>
+                <input type="search" id="rel-search" class="search-input" placeholder="Filter relationships…" autocomplete="off" />
+              </div>
+              <div style="flex:1"></div>
+              <span id="rel-count" class="entity-count"></span>
+            </div>
+            <div class="table-wrap">
+              <div id="panel-1n" class="rel-panel"></div>
+              <div id="panel-n1" class="rel-panel hidden"></div>
+              <div id="panel-nn" class="rel-panel hidden"></div>
+            </div>
+          </div>
+
+        </div><!-- /entity-detail -->
+
+        <!-- ── Option Set detail ── -->
+        <div class="entity-detail hidden" id="optionset-detail">
+
+          <div class="entity-header" id="optionset-header"></div>
+
+          <div class="panel-content">
+            <div class="panel-toolbar">
+              <div class="search-wrap search-wrap--sm">
+                <span class="search-icon">&#128269;</span>
+                <input type="search" id="os-option-search" class="search-input" placeholder="Filter options…" autocomplete="off" />
+              </div>
+              <div style="flex:1"></div>
+              <span id="os-option-count" class="entity-count"></span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="os-table">
+                <colgroup>
+                  <col style="width:12%">
+                  <col style="width:38%">
+                  <col style="width:10%">
+                  <col style="width:40%">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Value</th>
+                    <th>Label</th>
+                    <th>Color</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody id="os-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+        </div><!-- /optionset-detail -->
+
+      </main>
+
+    </div><!-- /app-body -->
+  </div><!-- /app -->
+
+  <script src="metadata.js"></script>
+</body>
+</html>
