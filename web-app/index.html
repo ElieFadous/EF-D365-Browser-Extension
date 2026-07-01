@@ -689,8 +689,35 @@
   'use strict';
 
   /* ── Bookmarklet href ──────────────────────────────────── */
-  var BOOKMARKLET = "javascript:(function(){if(window.__EF_PPT_LAUNCHER)return;var s=document.createElement('script');s.src='https://eliefadous.github.io/EF-D365-Browser-Extension/web-app/launcher.js?v='+Date.now();s.onerror=function(){alert('Could not load EF PPT. Check your connection.');};document.head.appendChild(s);})();";
-  document.getElementById('bookmarklet-link').href = BOOKMARKLET;
+  // Config is embedded directly in the bookmarklet so it is available on any
+  // D365 page without needing a cross-origin iframe (which D365 CSP blocks).
+  // Re-call after every save so the drag target stays up to date.
+  function generateBookmarklet() {
+    var raw = localStorage.getItem(CONFIG_KEY);
+    var cfgPart = '';
+    if (raw) {
+      try {
+        var parsed = JSON.parse(raw);
+        // btoa requires latin-1; unescape/encodeURIComponent handles any Unicode.
+        var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(parsed))));
+        cfgPart = "window.__EF_PPT_INIT_CONFIG=JSON.parse(decodeURIComponent(escape(atob('" + b64 + "'))));";
+      } catch (e) { /* no config yet */ }
+    }
+    return (
+      "javascript:(function(){" +
+        "if(window.__EF_PPT_LAUNCHER)return;" +
+        cfgPart +
+        "var s=document.createElement('script');" +
+        "s.src='https://eliefadous.github.io/EF-D365-Browser-Extension/web-app/launcher.js?v='+Date.now();" +
+        "s.onerror=function(){alert('Could not load EF PPT. Check your connection.');};" +
+        "document.head.appendChild(s);" +
+      "})();"
+    );
+  }
+  function refreshBookmarklet() {
+    document.getElementById('bookmarklet-link').href = generateBookmarklet();
+  }
+  refreshBookmarklet();
 
   /* ── Starter template ──────────────────────────────────── */
   var STARTER = {
@@ -744,7 +771,8 @@
       var parsed = JSON.parse(val);
       localStorage.setItem(CONFIG_KEY, JSON.stringify(parsed));
       textarea.value = JSON.stringify(parsed, null, 2);
-      showToast(true, 'Saved');
+      refreshBookmarklet();
+      showToast(true, 'Saved — drag the bookmark again to pick up the new config');
     } catch (e) {
       showToast(false, 'Invalid JSON — check syntax');
     }
