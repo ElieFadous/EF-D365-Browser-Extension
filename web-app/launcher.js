@@ -1354,6 +1354,20 @@
     panelShadow = panelHost.shadowRoot;
   }
 
+  // Close the flyout on any click outside it (or outside the bolt button).
+  // Capture phase so this still runs even if D365's own handlers later call
+  // stopPropagation() during bubbling. composedPath() is used (rather than
+  // e.target) because it correctly crosses the shadow DOM boundary — a click
+  // on an element inside panelShadow/boltShadow reports panelHost/host as
+  // ancestors in the path even though they're separate shadow trees.
+  document.addEventListener('click', function (ev) {
+    const panel = panelShadow.querySelector('#ef-panel');
+    if (!panel || !panel.classList.contains('open')) return;
+    const path = ev.composedPath ? ev.composedPath() : [];
+    if (path.indexOf(panelHost) !== -1 || path.indexOf(host) !== -1) return;
+    panel.classList.remove('open');
+  }, true);
+
   const BOLT_STYLES =
     ':host,*{box-sizing:border-box;}' +
     '.wrap{font-family:Segoe UI,system-ui,sans-serif;}' +
