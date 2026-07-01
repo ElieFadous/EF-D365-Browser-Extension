@@ -26,52 +26,35 @@
       .replace(/'/g, '&#39;');
   }
 
-  // ── Config bridge (reads/writes github.io localStorage via hidden iframe) ──
-  // launcher.js runs injected into D365 (dynamics.com origin). localStorage is
-  // per-origin, so we proxy config reads/writes through a hidden iframe served
-  // from github.io where the config actually lives.
-
-  let _cfgBridgeIframe = null;
-
-  function _ensureBridge() {
-    if (_cfgBridgeIframe) return;
-    _cfgBridgeIframe = document.createElement('iframe');
-    _cfgBridgeIframe.id = '__ef-ppt-cfg-bridge';
-    _cfgBridgeIframe.src = BASE_URL + '/config-bridge.html';
-    _cfgBridgeIframe.setAttribute(
-      'style',
-      'display:none;position:fixed;width:0;height:0;border:0;'
-    );
-    _cfgBridgeIframe.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(_cfgBridgeIframe);
-  }
-
   function loadConfig() {
-    // Returns a Promise<config|null>. The bridge iframe posts config-loaded on
-    // its own DOMContentLoaded, so we just need to listen for it.
-    return new Promise(function (resolve) {
-      const timer = setTimeout(function () {
-        window.removeEventListener('message', onMsg);
-        resolve(null);
-      }, 5000);
-      function onMsg(e) {
-        if (!e.data || e.data.__efppt !== 'config-loaded') return;
-        clearTimeout(timer);
-        window.removeEventListener('message', onMsg);
-        resolve(e.data.config || null);
-      }
-      window.addEventListener('message', onMsg);
-      _ensureBridge();
-    });
+    // The bookmarklet embeds the current config as window.__EF_PPT_INIT_CONFIG
+    // (base64-encoded JSON) so it is available in the D365 page context without
+    // any cross-origin iframe (which D365 CSP would block).  On first run we
+    // cache it to D365 localStorage so subsequent tool opens within the same
+    // session are instant even without re-clicking the bookmark.
+    if (window.__EF_PPT_INIT_CONFIG) {
+      const cfg = window.__EF_PPT_INIT_CONFIG;
+      delete window.__EF_PPT_INIT_CONFIG;
+      try { localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg)); } catch (_) {}
+      return cfg;
+    }
+    try {
+      const raw = localStorage.getItem(CONFIG_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (err) {
+      console.error('[EF PPT] Failed to parse config:', err);
+      return null;
+    }
   }
 
   function saveConfig(cfg) {
-    if (_cfgBridgeIframe && _cfgBridgeIframe.contentWindow) {
-      _cfgBridgeIframe.contentWindow.postMessage(
-        { __efppt: 'config-save', config: cfg }, '*'
-      );
+    try {
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+      return true;
+    } catch (err) {
+      console.error('[EF PPT] Failed to save config:', err);
+      return false;
     }
-    return true;
   }
 
   function currentEnv(cfg) {
@@ -138,7 +121,7 @@
   ];
 
   // ── State ───────────────────────────────────────────────────────────
-  let CFG = null;
+  let CFG = loadConfig();
   let selectedTargetId = null;
   let selectedType = 'open-in';
 
@@ -663,12 +646,7 @@
   }
 
   // ── Bootstrap ───────────────────────────────────────────────────────
-  // Config comes from github.io via the bridge iframe — wait for it before
-  // rendering so the flyout has correct environment data on first paint.
-  loadConfig().then(function (cfg) {
-    CFG = cfg;
-    renderFlyout();
-    if (!CFG) openConfigEditor();
-  });
+  renderFlyout();
+  if (!CFG) openConfigEditor();
 
 })();
