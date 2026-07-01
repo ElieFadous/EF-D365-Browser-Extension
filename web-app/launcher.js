@@ -94,6 +94,8 @@
     '</svg>';
 
   const TOOL_ICONS = {
+    'record-details':
+      '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3" width="13" height="12" rx="1.5"/><circle cx="6.5" cy="7.5" r="1.5"/><path d="M4 12c0-1.5 1.2-2.5 2.5-2.5S9 10.5 9 12"/><path d="M11 6.5h3M11 9h3M11 11.5h2"/></svg>',
     metadata:
       '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4.5v4c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-4"/><path d="M3.5 8.5v4c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-4"/><ellipse cx="9" cy="4.5" rx="5.5" ry="2"/></svg>',
     ribbon:
@@ -107,6 +109,7 @@
   };
 
   const TOOLS = [
+    { name: 'record-details', label: 'Record Details' },
     { name: 'metadata',     label: 'Metadata Browser' },
     { name: 'ribbon',       label: 'Ribbon Buttons'   },
     { name: 'plugin-trace', label: 'Plugin Trace'     },
@@ -948,7 +951,11 @@
     panelShadow.querySelectorAll('.tool-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         panel.classList.remove('open');
-        openTool(btn.getAttribute('data-tool'));
+        var toolName = btn.getAttribute('data-tool');
+        // Record Details needs the entity/record the D365 page is currently
+        // showing — the same context doGoTo()'s "Open In" type reads.
+        var extra = toolName === 'record-details' ? parseRecordContext() : null;
+        openTool(toolName, extra);
       });
     });
 
