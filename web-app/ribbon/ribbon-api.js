@@ -34,7 +34,8 @@ function _bridgeFetch(url, extraHeaders = {}, isText = false) {
       else reject(new Error(e.data.error || 'HTTP ' + e.data.status));
     }
     window.addEventListener('message', onMsg);
-    window.parent.postMessage({
+    // window.opener when popped out to its own tab; window.parent when embedded.
+    (window.opener || window.parent).postMessage({
       __efppt: 'fetch', id, url,
       method: 'GET',
       headers: extraHeaders,

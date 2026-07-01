@@ -34,7 +34,9 @@ const _bridgeFetch = (url, extraHeaders = {}, method = 'GET', body = null) =>
       else reject(new Error(e.data.error || 'HTTP ' + e.data.status));
     }
     window.addEventListener('message', onMsg);
-    window.parent.postMessage({ __efppt: 'fetch', id, url, method, headers: extraHeaders, body }, '*');
+    // window.opener is used when this tool has been popped out into its own
+    // tab (no iframe parent); window.parent covers the embedded-modal case.
+    (window.opener || window.parent).postMessage({ __efppt: 'fetch', id, url, method, headers: extraHeaders, body }, '*');
   });
 
 // HEAD-style existence check — needs the status code, not the body. The bridge
@@ -42,9 +44,19 @@ const _bridgeFetch = (url, extraHeaders = {}, method = 'GET', body = null) =>
 const _bridgeExists = (url) =>
   _bridgeFetch(url).then(() => true).catch(() => false);
 
-// ─── Config (localStorage) ───────────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
+// Prefer the `cfg` URL param (base64 JSON) that launcher.js embeds when opening
+// this tool. Reading localStorage directly does NOT reliably work here: this
+// page runs as a third-party iframe (github.io embedded on a dynamics.com
+// page), and browsers increasingly partition iframe storage per top-level
+// site, so `localStorage.getItem('ef_ppt_config')` can silently return null
+// even though the same key exists when github.io is visited directly.
 
 function _loadConfig() {
+  try {
+    const fromUrl = new URLSearchParams(location.search).get('cfg');
+    if (fromUrl) return JSON.parse(decodeURIComponent(escape(atob(fromUrl))));
+  } catch (_) { /* fall through to localStorage */ }
   try { return JSON.parse(localStorage.getItem('ef_ppt_config')) ?? {}; }
   catch { return {}; }
 }
