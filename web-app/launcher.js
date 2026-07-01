@@ -365,16 +365,14 @@
   }
 
   // ════════════════════════════════════════════════════════════════════
-  //  CONFIG EDITOR OVERLAY  (appended to body, not shadow DOM)
+  //  CONFIG VIEWER OVERLAY  (appended to body, not shadow DOM)
   // ════════════════════════════════════════════════════════════════════
-  function bookmarkletCode() {
-    const loaderSrc = BASE_URL + '/launcher.js';
-    return (
-      "javascript:(function(){var s=document.createElement('script');" +
-      "s.src='" + loaderSrc + "?v='+Date.now();document.body.appendChild(s);})();"
-    );
-  }
-
+  // Read-only by design. Config lives in ONE place — the github.io web app's
+  // localStorage — and reaches every D365 environment by being embedded in
+  // the bookmarklet URL when you drag it. Editing here would write only to
+  // this D365 origin's localStorage, silently diverging from every other
+  // environment and from github.io itself. Always edit on github.io, then
+  // re-drag the bookmark so the new config reaches every environment.
   function closeConfigEditor() {
     const ex = document.getElementById('__ef-ppt-config-overlay');
     if (ex) ex.remove();
@@ -384,7 +382,8 @@
     closeConfigEditor();
     const current = CFG || STARTER_CONFIG;
     const json = JSON.stringify(current, null, 2);
-    const bm = bookmarkletCode();
+    const isPlaceholder = !CFG;
+    const configPageUrl = BASE_URL + '/index.html';
 
     const overlay = document.createElement('div');
     overlay.id = '__ef-ppt-config-overlay';
@@ -406,22 +405,20 @@
 
     overlay.innerHTML =
       '<div style="background:#fff;border-radius:12px;max-width:640px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.4);padding:20px 22px;box-sizing:border-box;">' +
-        '<h2 style="margin:0 0 4px;font-size:18px;color:#1B3A6B;">EF PPT — Configure</h2>' +
-        '<p style="margin:0 0 12px;font-size:12px;color:#475569;">Edit the JSON config below. It is stored in this browser’s localStorage.</p>' +
-        '<textarea id="__ef-ppt-cfg-text" spellcheck="false" style="width:100%;height:280px;box-sizing:border-box;font-family:Consolas,monospace;font-size:12px;border:1px solid #cbd5e1;border-radius:8px;padding:10px;resize:vertical;">' +
+        '<h2 style="margin:0 0 4px;font-size:18px;color:#1B3A6B;">EF PPT — Configuration</h2>' +
+        (isPlaceholder
+          ? '<p style="margin:0 0 12px;font-size:12px;color:#b91c1c;">No config found. Set up your environments on the web app, then drag the bookmark into your bookmark bar.</p>'
+          : '<p style="margin:0 0 12px;font-size:12px;color:#475569;">Read-only — this is the config currently active on this environment. ' +
+            'To make changes, edit it on the web app and drag a fresh bookmark so every environment picks up the update.</p>') +
+        '<textarea id="__ef-ppt-cfg-text" readonly spellcheck="false" style="width:100%;height:280px;box-sizing:border-box;font-family:Consolas,monospace;font-size:12px;border:1px solid #cbd5e1;border-radius:8px;padding:10px;resize:vertical;background:#f8fafc;color:#334155;">' +
           escHtml(json) +
         '</textarea>' +
-        '<div id="__ef-ppt-cfg-err" style="color:#b91c1c;font-size:12px;min-height:16px;margin:6px 2px;"></div>' +
-        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:16px;">' +
-          '<button id="__ef-ppt-cfg-cancel" type="button" style="padding:8px 16px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;cursor:pointer;font-size:13px;">Cancel</button>' +
-          '<button id="__ef-ppt-cfg-save" type="button" style="padding:8px 16px;border:none;background:#1B3A6B;color:#fff;border-radius:8px;cursor:pointer;font-size:13px;">Save</button>' +
-        '</div>' +
-        '<div style="border-top:1px solid #e2e8f0;padding-top:12px;">' +
-          '<div style="font-size:12px;font-weight:600;color:#334155;margin-bottom:4px;">Bookmarklet</div>' +
-          '<p style="margin:0 0 6px;font-size:11px;color:#64748b;">Create a new bookmark and paste this as the URL:</p>' +
-          '<textarea readonly spellcheck="false" onclick="this.select()" style="width:100%;height:64px;box-sizing:border-box;font-family:Consolas,monospace;font-size:11px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;background:#f8fafc;color:#334155;">' +
-            escHtml(bm) +
-          '</textarea>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
+          '<button id="__ef-ppt-cfg-close" type="button" style="padding:8px 16px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;cursor:pointer;font-size:13px;">Close</button>' +
+          '<a id="__ef-ppt-cfg-open" href="' + escHtml(configPageUrl) + '" target="_blank" rel="noopener" ' +
+            'style="padding:8px 16px;border:none;background:#1B3A6B;color:#fff;border-radius:8px;cursor:pointer;font-size:13px;text-decoration:none;display:inline-flex;align-items:center;">' +
+            'Edit on Web App ↗' +
+          '</a>' +
         '</div>' +
       '</div>';
 
@@ -431,29 +428,7 @@
       if (ev.target === overlay) closeConfigEditor();
     });
 
-    const errEl = overlay.querySelector('#__ef-ppt-cfg-err');
-    overlay.querySelector('#__ef-ppt-cfg-cancel').addEventListener('click', closeConfigEditor);
-    overlay.querySelector('#__ef-ppt-cfg-save').addEventListener('click', function () {
-      const txt = overlay.querySelector('#__ef-ppt-cfg-text').value;
-      let parsed;
-      try {
-        parsed = JSON.parse(txt);
-      } catch (err) {
-        errEl.textContent = 'Invalid JSON: ' + (err && err.message ? err.message : err);
-        return;
-      }
-      if (!parsed || !Array.isArray(parsed.environments)) {
-        errEl.textContent = 'Config must contain an "environments" array.';
-        return;
-      }
-      if (!saveConfig(parsed)) {
-        errEl.textContent = 'Could not write to localStorage.';
-        return;
-      }
-      CFG = parsed;
-      closeConfigEditor();
-      renderFlyout();
-    });
+    overlay.querySelector('#__ef-ppt-cfg-close').addEventListener('click', closeConfigEditor);
   }
 
   // ════════════════════════════════════════════════════════════════════
