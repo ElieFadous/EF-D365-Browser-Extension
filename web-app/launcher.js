@@ -86,8 +86,10 @@
   };
 
   // ── Icon SVGs ───────────────────────────────────────────────────────
+  // viewBox is cropped tightly around the polygon (instead of the full
+  // 64x64 canvas) so the bolt fills the button instead of looking tiny.
   const BOLT_SVG =
-    '<svg viewBox="0 0 64 64" width="20" height="20" aria-hidden="true">' +
+    '<svg viewBox="21 15 28 38" width="22" height="22" aria-hidden="true">' +
     '<polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>' +
     '</svg>';
 
@@ -455,14 +457,24 @@
   }
 
   // ════════════════════════════════════════════════════════════════════
-  //  SHADOW DOM HOST + FLYOUT
+  //  SHADOW DOM HOSTS + FLYOUT
   // ════════════════════════════════════════════════════════════════════
+  // Two separate shadow hosts are used:
+  //  - `host` / `boltShadow`  — just the bolt button, injected into the D365
+  //    command bar (or a fixed fallback) so it visually sits with the other
+  //    toolbar icons.
+  //  - `panelHost` / `panelShadow` — the flyout panel, appended directly to
+  //    <body>. Keeping it OUTSIDE the command bar's DOM subtree matters:
+  //    D365's header often has an ancestor with a CSS transform/filter,
+  //    which would silently hijack position:fixed to be relative to that
+  //    ancestor instead of the viewport, rendering the panel off-screen.
+  //
   // `host` is the element removed on Close (may be an <li> wrapper).
-  // `shadowHost` is always a <div>, since attachShadow() only supports a
-  // specific allowlist of tags and <li> is NOT one of them (throws
-  // NotSupportedError, silently aborting the whole script).
+  // The inner shadow-hosting <div> is always a <div>, since attachShadow()
+  // only supports a specific allowlist of tags and <li> is NOT one of them
+  // (throws NotSupportedError, silently aborting the whole script).
   let host = document.getElementById('__ef-ppt-host');
-  let shadow;
+  let boltShadow, panelShadow, panelHost;
   let _inToolbar = false;
 
   if (!host) {
@@ -470,28 +482,36 @@
     // alongside New / Notifications / Settings / Help instead of overlapping
     // the user-profile icon in the top-right corner.
     const cmdBar = document.querySelector('ul[data-id="CommandBar"]');
-    const shadowHost = document.createElement('div');
+    const boltShadowHost = document.createElement('div');
     if (cmdBar) {
       host = document.createElement('li');
       host.id = '__ef-ppt-host';
       host.setAttribute('role', 'presentation');
       host.setAttribute('style', 'display:flex;align-items:center;list-style:none;position:relative;');
-      host.appendChild(shadowHost);
+      host.appendChild(boltShadowHost);
       cmdBar.appendChild(host);
       _inToolbar = true;
     } else {
-      host = shadowHost;
+      host = boltShadowHost;
       host.id = '__ef-ppt-host';
-      host.setAttribute('style', 'all:initial;position:fixed;top:0;right:0;z-index:2147483647;');
+      host.setAttribute('style', 'all:initial;position:fixed;top:8px;right:8px;z-index:2147483647;');
       document.body.appendChild(host);
     }
-    shadow = shadowHost.attachShadow({ mode: 'open' });
+    boltShadow = boltShadowHost.attachShadow({ mode: 'open' });
+
+    panelHost = document.createElement('div');
+    panelHost.id = '__ef-ppt-panel-host';
+    panelHost.setAttribute('style', 'all:initial;position:absolute;top:0;left:0;width:0;height:0;overflow:visible;z-index:2147483647;');
+    document.body.appendChild(panelHost);
+    panelShadow = panelHost.attachShadow({ mode: 'open' });
   } else {
     _inToolbar = host.tagName.toLowerCase() === 'li';
-    shadow = _inToolbar ? host.firstElementChild.shadowRoot : host.shadowRoot;
+    boltShadow = _inToolbar ? host.firstElementChild.shadowRoot : host.shadowRoot;
+    panelHost = document.getElementById('__ef-ppt-panel-host');
+    panelShadow = panelHost.shadowRoot;
   }
 
-  const STYLES =
+  const BOLT_STYLES =
     ':host,*{box-sizing:border-box;}' +
     '.wrap{font-family:Segoe UI,system-ui,sans-serif;}' +
     (_inToolbar
@@ -503,14 +523,18 @@
         '.env-dot{position:absolute;bottom:3px;right:3px;width:7px;height:7px;' +
           'border-radius:50%;pointer-events:none;border:1.5px solid rgba(0,0,0,.25);}'
       // Fallback: fixed pill in top-right corner
-      : '.bolt-btn{position:fixed;top:8px;right:8px;width:36px;height:36px;' +
+      : '.bolt-btn{width:36px;height:36px;' +
           'background:#1B3A6B;color:#fff;border:none;border-radius:8px;cursor:pointer;' +
           'display:flex;align-items:center;justify-content:center;' +
-          'border-left:4px solid #888;box-shadow:0 2px 8px rgba(0,0,0,.3);padding:0;}' +
+          'border-left:4px solid #888;box-shadow:0 2px 8px rgba(0,0,0,.3);padding:0;position:relative;}' +
         '.bolt-btn:hover{filter:brightness(1.1);}' +
         '.env-dot{position:absolute;bottom:3px;right:3px;width:7px;height:7px;' +
-          'border-radius:50%;pointer-events:none;border:1.5px solid rgba(0,0,0,.25);}') +
-    '.panel{position:fixed;top:' + (_inToolbar ? '48' : '52') + 'px;right:8px;width:300px;background:#fff;' +
+          'border-radius:50%;pointer-events:none;border:1.5px solid rgba(0,0,0,.25);}');
+
+  const PANEL_STYLES =
+    ':host,*{box-sizing:border-box;}' +
+    '.wrap{font-family:Segoe UI,system-ui,sans-serif;}' +
+    '.panel{position:fixed;width:300px;background:#fff;' +
       'border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.25);' +
       'overflow:hidden;display:none;color:#1e293b;font-size:13px;}' +
     '.panel.open{display:block;}' +
@@ -548,7 +572,25 @@
     '.rm-link:hover{color:#b91c1c;}' +
     '.empty{font-size:12px;color:#64748b;}';
 
-  function buildFlyoutMarkup() {
+  function buildBoltMarkup() {
+    const env = currentEnv(CFG);
+    const envColor = env && env.color ? env.color : '#888';
+    const boltInner = _inToolbar
+      ? BOLT_SVG + '<span class="env-dot" style="background:' + escHtml(envColor) + '"></span>'
+      : BOLT_SVG;
+    const boltStyle = _inToolbar
+      ? ''
+      : 'style="border-left-color:' + escHtml(envColor) + '"';
+
+    return (
+      '<div class="wrap">' +
+        '<button type="button" class="bolt-btn" id="ef-bolt" title="EF Power Platform Tools" ' +
+          boltStyle + '>' + boltInner + '</button>' +
+      '</div>'
+    );
+  }
+
+  function buildPanelMarkup() {
     const env = currentEnv(CFG);
     const envColor = env && env.color ? env.color : '#888';
     const envs = (CFG && CFG.environments) || [];
@@ -600,17 +642,8 @@
       );
     }).join('');
 
-    const boltInner = _inToolbar
-      ? BOLT_SVG + '<span class="env-dot" style="background:' + escHtml(envColor) + '"></span>'
-      : BOLT_SVG;
-    const boltStyle = _inToolbar
-      ? ''
-      : 'style="border-left-color:' + escHtml(envColor) + '"';
-
     return (
       '<div class="wrap">' +
-        '<button type="button" class="bolt-btn" id="ef-bolt" title="EF Power Platform Tools" ' +
-          boltStyle + '>' + boltInner + '</button>' +
         '<div class="panel" id="ef-panel">' +
           '<div class="hdr">' + hdr + '</div>' +
           '<div class="sect">' +
@@ -632,42 +665,56 @@
     );
   }
 
+  // Positions the panel (fixed, body-level) just under/right of the bolt
+  // button (which may live inside the D365 toolbar).
+  function positionPanel() {
+    const boltBtn = boltShadow.querySelector('#ef-bolt');
+    const panel = panelShadow.querySelector('#ef-panel');
+    if (!boltBtn || !panel) return;
+    const rect = boltBtn.getBoundingClientRect();
+    panel.style.top = (rect.bottom + 6) + 'px';
+    panel.style.right = Math.max(8, window.innerWidth - rect.right) + 'px';
+  }
+
   function renderFlyout() {
     const panelWasOpen = (function () {
-      const p = shadow.querySelector('#ef-panel');
+      const p = panelShadow.querySelector('#ef-panel');
       return p ? p.classList.contains('open') : false;
     })();
 
-    shadow.innerHTML = '<style>' + STYLES + '</style>' + buildFlyoutMarkup();
+    boltShadow.innerHTML = '<style>' + BOLT_STYLES + '</style>' + buildBoltMarkup();
+    panelShadow.innerHTML = '<style>' + PANEL_STYLES + '</style>' + buildPanelMarkup();
 
-    const boltBtn = shadow.querySelector('#ef-bolt');
-    const panel = shadow.querySelector('#ef-panel');
+    const boltBtn = boltShadow.querySelector('#ef-bolt');
+    const panel = panelShadow.querySelector('#ef-panel');
     if (panelWasOpen) panel.classList.add('open');
 
     boltBtn.addEventListener('click', function () {
+      const willOpen = !panel.classList.contains('open');
+      if (willOpen) positionPanel();
       panel.classList.toggle('open');
     });
 
     // Env chips
-    shadow.querySelectorAll('.env-chip').forEach(function (chip) {
+    panelShadow.querySelectorAll('.env-chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
         selectedTargetId = chip.getAttribute('data-env-id');
-        shadow.querySelectorAll('.env-chip').forEach(function (c) { c.classList.remove('active'); });
+        panelShadow.querySelectorAll('.env-chip').forEach(function (c) { c.classList.remove('active'); });
         chip.classList.add('active');
       });
     });
 
     // Type buttons
-    shadow.querySelectorAll('.type-btn').forEach(function (btn) {
+    panelShadow.querySelectorAll('.type-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         selectedType = btn.getAttribute('data-type');
-        shadow.querySelectorAll('.type-btn').forEach(function (b) { b.classList.remove('active'); });
+        panelShadow.querySelectorAll('.type-btn').forEach(function (b) { b.classList.remove('active'); });
         btn.classList.add('active');
       });
     });
 
     // Go button
-    shadow.querySelector('#ef-go').addEventListener('click', function () {
+    panelShadow.querySelector('#ef-go').addEventListener('click', function () {
       if (!selectedTargetId) {
         const first = (CFG && CFG.environments && CFG.environments[0]);
         if (first) selectedTargetId = first.id;
@@ -677,7 +724,7 @@
     });
 
     // Tool buttons
-    shadow.querySelectorAll('.tool-btn').forEach(function (btn) {
+    panelShadow.querySelectorAll('.tool-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         panel.classList.remove('open');
         openTool(btn.getAttribute('data-tool'));
@@ -685,10 +732,10 @@
     });
 
     // Config link
-    shadow.querySelector('#ef-cfg').addEventListener('click', openConfigEditor);
+    panelShadow.querySelector('#ef-cfg').addEventListener('click', openConfigEditor);
 
     // Remove / close launcher
-    shadow.querySelector('#ef-remove').addEventListener('click', destroyLauncher);
+    panelShadow.querySelector('#ef-remove').addEventListener('click', destroyLauncher);
   }
 
   // ── Destroy ─────────────────────────────────────────────────────────
@@ -697,6 +744,7 @@
     if (cfgOv) cfgOv.remove();
     const toolOv = document.getElementById('__ef-ppt-tool-overlay');
     if (toolOv) toolOv.remove();
+    if (panelHost && panelHost.parentNode) panelHost.parentNode.removeChild(panelHost);
     if (host && host.parentNode) host.parentNode.removeChild(host);
     delete window.__EF_PPT_LAUNCHER;
   }
