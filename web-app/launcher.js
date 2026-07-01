@@ -457,6 +457,10 @@
   // ════════════════════════════════════════════════════════════════════
   //  SHADOW DOM HOST + FLYOUT
   // ════════════════════════════════════════════════════════════════════
+  // `host` is the element removed on Close (may be an <li> wrapper).
+  // `shadowHost` is always a <div>, since attachShadow() only supports a
+  // specific allowlist of tags and <li> is NOT one of them (throws
+  // NotSupportedError, silently aborting the whole script).
   let host = document.getElementById('__ef-ppt-host');
   let shadow;
   let _inToolbar = false;
@@ -466,23 +470,25 @@
     // alongside New / Notifications / Settings / Help instead of overlapping
     // the user-profile icon in the top-right corner.
     const cmdBar = document.querySelector('ul[data-id="CommandBar"]');
+    const shadowHost = document.createElement('div');
     if (cmdBar) {
       host = document.createElement('li');
       host.id = '__ef-ppt-host';
       host.setAttribute('role', 'presentation');
       host.setAttribute('style', 'display:flex;align-items:center;list-style:none;position:relative;');
+      host.appendChild(shadowHost);
       cmdBar.appendChild(host);
       _inToolbar = true;
     } else {
-      host = document.createElement('div');
+      host = shadowHost;
       host.id = '__ef-ppt-host';
       host.setAttribute('style', 'all:initial;position:fixed;top:0;right:0;z-index:2147483647;');
       document.body.appendChild(host);
     }
-    shadow = host.attachShadow({ mode: 'open' });
+    shadow = shadowHost.attachShadow({ mode: 'open' });
   } else {
-    shadow = host.shadowRoot;
     _inToolbar = host.tagName.toLowerCase() === 'li';
+    shadow = _inToolbar ? host.firstElementChild.shadowRoot : host.shadowRoot;
   }
 
   const STYLES =
