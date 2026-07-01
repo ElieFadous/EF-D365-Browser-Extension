@@ -459,26 +459,52 @@
   // ════════════════════════════════════════════════════════════════════
   let host = document.getElementById('__ef-ppt-host');
   let shadow;
+  let _inToolbar = false;
 
   if (!host) {
-    host = document.createElement('div');
-    host.id = '__ef-ppt-host';
-    host.setAttribute('style', 'all:initial;position:fixed;top:0;right:0;z-index:2147483647;');
-    document.body.appendChild(host);
+    // Prefer injecting into the D365 global command bar so the button sits
+    // alongside New / Notifications / Settings / Help instead of overlapping
+    // the user-profile icon in the top-right corner.
+    const cmdBar = document.querySelector('ul[data-id="CommandBar"]');
+    if (cmdBar) {
+      host = document.createElement('li');
+      host.id = '__ef-ppt-host';
+      host.setAttribute('role', 'presentation');
+      host.setAttribute('style', 'display:flex;align-items:center;list-style:none;position:relative;');
+      cmdBar.appendChild(host);
+      _inToolbar = true;
+    } else {
+      host = document.createElement('div');
+      host.id = '__ef-ppt-host';
+      host.setAttribute('style', 'all:initial;position:fixed;top:0;right:0;z-index:2147483647;');
+      document.body.appendChild(host);
+    }
     shadow = host.attachShadow({ mode: 'open' });
   } else {
     shadow = host.shadowRoot;
+    _inToolbar = host.tagName.toLowerCase() === 'li';
   }
 
   const STYLES =
     ':host,*{box-sizing:border-box;}' +
     '.wrap{font-family:Segoe UI,system-ui,sans-serif;}' +
-    '.bolt-btn{position:fixed;top:8px;right:8px;width:36px;height:36px;' +
-      'background:#1B3A6B;color:#fff;border:none;border-radius:8px;cursor:pointer;' +
-      'display:flex;align-items:center;justify-content:center;' +
-      'border-left:4px solid #888;box-shadow:0 2px 8px rgba(0,0,0,.3);padding:0;}' +
-    '.bolt-btn:hover{filter:brightness(1.1);}' +
-    '.panel{position:fixed;top:52px;right:8px;width:300px;background:#fff;' +
+    (_inToolbar
+      // Toolbar mode: transparent button that blends with the D365 header
+      ? '.bolt-btn{width:36px;height:36px;background:transparent;color:#fff;border:none;' +
+          'border-radius:6px;cursor:pointer;display:flex;align-items:center;' +
+          'justify-content:center;padding:0;position:relative;}' +
+        '.bolt-btn:hover{background:rgba(255,255,255,.15);}' +
+        '.env-dot{position:absolute;bottom:3px;right:3px;width:7px;height:7px;' +
+          'border-radius:50%;pointer-events:none;border:1.5px solid rgba(0,0,0,.25);}'
+      // Fallback: fixed pill in top-right corner
+      : '.bolt-btn{position:fixed;top:8px;right:8px;width:36px;height:36px;' +
+          'background:#1B3A6B;color:#fff;border:none;border-radius:8px;cursor:pointer;' +
+          'display:flex;align-items:center;justify-content:center;' +
+          'border-left:4px solid #888;box-shadow:0 2px 8px rgba(0,0,0,.3);padding:0;}' +
+        '.bolt-btn:hover{filter:brightness(1.1);}' +
+        '.env-dot{position:absolute;bottom:3px;right:3px;width:7px;height:7px;' +
+          'border-radius:50%;pointer-events:none;border:1.5px solid rgba(0,0,0,.25);}') +
+    '.panel{position:fixed;top:' + (_inToolbar ? '48' : '52') + 'px;right:8px;width:300px;background:#fff;' +
       'border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.25);' +
       'overflow:hidden;display:none;color:#1e293b;font-size:13px;}' +
     '.panel.open{display:block;}' +
@@ -503,14 +529,17 @@
       'color:#fff;cursor:pointer;font-size:13px;font-weight:600;}' +
     '.go-btn:hover{filter:brightness(1.1);}' +
     '.tools-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}' +
-    '.tool-btn{display:flex;align-items:center;gap:6px;padding:8px;border:1px solid #e2e8f0;' +
+    '.tool-btn{display:flex;align-items:center;gap:6px;padding:7px 8px;border:1px solid #e2e8f0;' +
       'border-radius:8px;background:#f8fafc;cursor:pointer;font-size:12px;color:#1e293b;' +
-      'text-align:left;}' +
+      'text-align:left;overflow:hidden;}' +
     '.tool-btn:hover{background:#eef2ff;border-color:#c7d2fe;}' +
-    '.tool-btn svg{flex:0 0 auto;color:#1B3A6B;}' +
-    '.ftr{padding:8px 14px;background:#f8fafc;text-align:right;}' +
+    '.tool-btn svg{flex:0 0 auto;color:#1B3A6B;width:15px;height:15px;}' +
+    '.tool-btn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}' +
+    '.ftr{padding:8px 14px;background:#f8fafc;display:flex;align-items:center;justify-content:space-between;}' +
     '.cfg-link{font-size:12px;color:#1B3A6B;cursor:pointer;text-decoration:none;background:none;border:none;padding:0;}' +
     '.cfg-link:hover{text-decoration:underline;}' +
+    '.rm-link{font-size:12px;color:#94a3b8;cursor:pointer;background:none;border:none;padding:0;}' +
+    '.rm-link:hover{color:#b91c1c;}' +
     '.empty{font-size:12px;color:#64748b;}';
 
   function buildFlyoutMarkup() {
@@ -565,10 +594,17 @@
       );
     }).join('');
 
+    const boltInner = _inToolbar
+      ? BOLT_SVG + '<span class="env-dot" style="background:' + escHtml(envColor) + '"></span>'
+      : BOLT_SVG;
+    const boltStyle = _inToolbar
+      ? ''
+      : 'style="border-left-color:' + escHtml(envColor) + '"';
+
     return (
       '<div class="wrap">' +
         '<button type="button" class="bolt-btn" id="ef-bolt" title="EF Power Platform Tools" ' +
-          'style="border-left-color:' + escHtml(envColor) + '">' + BOLT_SVG + '</button>' +
+          boltStyle + '>' + boltInner + '</button>' +
         '<div class="panel" id="ef-panel">' +
           '<div class="hdr">' + hdr + '</div>' +
           '<div class="sect">' +
@@ -583,6 +619,7 @@
           '</div>' +
           '<div class="ftr">' +
             '<button type="button" class="cfg-link" id="ef-cfg">⚙ Config</button>' +
+            '<button type="button" class="rm-link" id="ef-remove" title="Remove launcher from this page">✕ Close</button>' +
           '</div>' +
         '</div>' +
       '</div>'
@@ -643,6 +680,19 @@
 
     // Config link
     shadow.querySelector('#ef-cfg').addEventListener('click', openConfigEditor);
+
+    // Remove / close launcher
+    shadow.querySelector('#ef-remove').addEventListener('click', destroyLauncher);
+  }
+
+  // ── Destroy ─────────────────────────────────────────────────────────
+  function destroyLauncher() {
+    const cfgOv = document.getElementById('__ef-ppt-config-overlay');
+    if (cfgOv) cfgOv.remove();
+    const toolOv = document.getElementById('__ef-ppt-tool-overlay');
+    if (toolOv) toolOv.remove();
+    if (host && host.parentNode) host.parentNode.removeChild(host);
+    delete window.__EF_PPT_LAUNCHER;
   }
 
   // ── Bootstrap ───────────────────────────────────────────────────────
