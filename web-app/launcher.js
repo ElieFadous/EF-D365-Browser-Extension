@@ -126,6 +126,7 @@
   let CFG = loadConfig();
   let selectedTargetId = null;
   let selectedType = 'open-in';
+  let selectedAppUniqueName = null;
 
   // ════════════════════════════════════════════════════════════════════
   //  FETCH BRIDGE
@@ -191,15 +192,14 @@
   });
 
   // ════════════════════════════════════════════════════════════════════
-  //  TOOL OVERLAY  (full-screen iframe, appended to body)
+  //  TOOL MODAL  (large centered dialog, with a pop-out-to-tab button)
   // ════════════════════════════════════════════════════════════════════
   function closeTool() {
     const ex = document.getElementById('__ef-ppt-tool-overlay');
     if (ex) ex.remove();
   }
 
-  function openTool(toolName, extraParams) {
-    closeTool();
+  function buildToolUrl(toolName, extraParams) {
     const env = currentEnv(CFG);
 
     const params = new URLSearchParams();
@@ -209,14 +209,27 @@
       if (env.powerAppsId) params.set('paEnvId', env.powerAppsId);
     }
     params.set('_inModal', '1');
+    // Embed the full config as base64 so the tool page can read it even when
+    // browser storage partitioning blocks it from seeing github.io's
+    // localStorage while running as a third-party iframe on this D365 page.
+    if (CFG) {
+      try {
+        params.set('cfg', btoa(unescape(encodeURIComponent(JSON.stringify(CFG)))));
+      } catch (_) { /* leave cfg out — tool falls back to its own localStorage */ }
+    }
     if (extraParams && typeof extraParams === 'object') {
       Object.keys(extraParams).forEach(function (k) {
         if (extraParams[k] != null) params.set(k, extraParams[k]);
       });
     }
 
-    const src =
-      BASE_URL + '/' + toolName + '/' + toolName + '.html?' + params.toString();
+    return BASE_URL + '/' + toolName + '/' + toolName + '.html?' + params.toString();
+  }
+
+  function openTool(toolName, extraParams) {
+    closeTool();
+    const src = buildToolUrl(toolName, extraParams);
+    const label = (TOOLS.find(function (t) { return t.name === toolName; }) || {}).label || toolName;
 
     const overlay = document.createElement('div');
     overlay.id = '__ef-ppt-tool-overlay';
@@ -228,37 +241,91 @@
         'z-index:2147483646',
         'background:rgba(15,23,42,0.55)',
         'display:flex',
-        'flex-direction:column',
+        'align-items:center',
+        'justify-content:center',
         'margin:0',
-        'padding:0'
+        'padding:0',
+        'font-family:Segoe UI,system-ui,sans-serif'
       ].join(';')
     );
 
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.title = 'Close';
-    closeBtn.setAttribute('aria-label', 'Close tool');
-    closeBtn.textContent = '✕';
-    closeBtn.setAttribute(
+    const dialog = document.createElement('div');
+    dialog.setAttribute(
       'style',
       [
-        'position:absolute',
-        'top:10px',
-        'right:14px',
-        'width:34px',
-        'height:34px',
-        'border:none',
-        'border-radius:8px',
-        'background:#1B3A6B',
-        'color:#fff',
-        'font-size:16px',
-        'line-height:1',
-        'cursor:pointer',
-        'z-index:2',
-        'box-shadow:0 2px 8px rgba(0,0,0,.35)'
+        'width:92vw',
+        'height:88vh',
+        'max-width:1400px',
+        'background:#fff',
+        'border-radius:12px',
+        'box-shadow:0 20px 60px rgba(0,0,0,.45)',
+        'display:flex',
+        'flex-direction:column',
+        'overflow:hidden'
       ].join(';')
     );
+
+    const titleBar = document.createElement('div');
+    titleBar.setAttribute(
+      'style',
+      [
+        'flex:0 0 auto',
+        'display:flex',
+        'align-items:center',
+        'justify-content:space-between',
+        'padding:10px 14px',
+        'background:#1B3A6B',
+        'color:#fff'
+      ].join(';')
+    );
+
+    const titleLabel = document.createElement('span');
+    titleLabel.textContent = 'EF PPT — ' + label;
+    titleLabel.setAttribute('style', 'font-size:13px;font-weight:600;');
+
+    const btnGroup = document.createElement('div');
+    btnGroup.setAttribute('style', 'display:flex;align-items:center;gap:6px;');
+
+    function makeIconBtn(text, title) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.title = title;
+      b.setAttribute('aria-label', title);
+      b.textContent = text;
+      b.setAttribute(
+        'style',
+        [
+          'width:28px',
+          'height:28px',
+          'border:none',
+          'border-radius:6px',
+          'background:rgba(255,255,255,.12)',
+          'color:#fff',
+          'font-size:13px',
+          'line-height:1',
+          'cursor:pointer'
+        ].join(';')
+      );
+      b.addEventListener('mouseenter', function () { b.style.background = 'rgba(255,255,255,.25)'; });
+      b.addEventListener('mouseleave', function () { b.style.background = 'rgba(255,255,255,.12)'; });
+      return b;
+    }
+
+    const popoutBtn = makeIconBtn('⧉', 'Open in new tab');
+    popoutBtn.addEventListener('click', function () {
+      // No 'noopener' — the popped-out tab keeps window.opener so its D365
+      // fetch bridge can still relay calls back through this launcher.
+      window.open(src, '_blank');
+      closeTool();
+    });
+
+    const closeBtn = makeIconBtn('✕', 'Close');
     closeBtn.addEventListener('click', closeTool);
+
+    btnGroup.appendChild(popoutBtn);
+    btnGroup.appendChild(closeBtn);
+    titleBar.appendChild(titleLabel);
+    titleBar.appendChild(btnGroup);
 
     const iframe = document.createElement('iframe');
     iframe.src = src;
@@ -267,49 +334,25 @@
       [
         'flex:1 1 auto',
         'width:100%',
-        'height:100%',
         'border:none',
         'background:#fff'
       ].join(';')
     );
     iframe.setAttribute('allow', 'clipboard-write');
 
-    overlay.appendChild(closeBtn);
-    overlay.appendChild(iframe);
+    dialog.appendChild(titleBar);
+    dialog.appendChild(iframe);
+    overlay.appendChild(dialog);
     document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', function (ev) {
+      if (ev.target === overlay) closeTool();
+    });
   }
 
   // ════════════════════════════════════════════════════════════════════
   //  GO TO  logic
   // ════════════════════════════════════════════════════════════════════
-  async function resolveCurrentAppUniqueName() {
-    try {
-      const ver = apiVersion(CFG);
-      const cur = new URLSearchParams(window.location.search);
-      const appId = cur.get('appid');
-      if (!appId) return '';
-      const url =
-        window.location.origin +
-        '/api/data/' + ver +
-        '/appmodules?$select=uniquename&$filter=appmoduleid eq ' + appId;
-      const res = await fetch(url, {
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-          'OData-MaxVersion': '4.0',
-          'OData-Version': '4.0'
-        }
-      });
-      if (!res.ok) return '';
-      const data = await res.json();
-      if (data && data.value && data.value[0]) return data.value[0].uniquename || '';
-      return '';
-    } catch (err) {
-      console.error('[EF PPT] Failed to resolve app unique name:', err);
-      return '';
-    }
-  }
-
   function parseRecordContext() {
     // Read entity + record id from the current D365 URL.
     const p = new URLSearchParams(window.location.search);
@@ -317,6 +360,53 @@
       etn: p.get('etn') || '',
       id: (p.get('id') || '').replace(/[{}]/g, '')
     };
+  }
+
+  // ── Configured apps (for the "App" Go-To type) ─────────────────────────
+  // settings.includedApps is a flat list of app uniquenames (global, not
+  // per-environment — matches the original extension's model). Friendly
+  // display names are best-effort: fetched once from the CURRENT environment
+  // (same-origin, no bridge needed) and used purely for labelling the
+  // dropdown. Navigation itself only ever needs the uniquename, via D365's
+  // `/apps/uniquename/<name>` launch URL — the same reliable pattern the
+  // extension uses, which needs no cross-environment app-id resolution at all.
+  let _appNameCache = null; // Map<uniquename, displayName> | null while loading
+
+  function configuredAppUniqueNames() {
+    const settings = (CFG && CFG.settings) || {};
+    const list = Array.isArray(settings.includedApps) ? settings.includedApps.slice() : [];
+    if (settings.defaultAppUniqueName && list.indexOf(settings.defaultAppUniqueName) === -1) {
+      list.unshift(settings.defaultAppUniqueName);
+    }
+    return list;
+  }
+
+  async function ensureAppNames() {
+    if (_appNameCache) return _appNameCache;
+    _appNameCache = new Map();
+    try {
+      const ver = apiVersion(CFG);
+      const res = await fetch(
+        window.location.origin + '/api/data/' + ver + '/appmodules?$select=uniquename,name',
+        {
+          credentials: 'include',
+          headers: { Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' }
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        (data.value || []).forEach(function (a) {
+          if (a.uniquename) _appNameCache.set(a.uniquename, a.name || a.uniquename);
+        });
+      }
+    } catch (err) {
+      console.error('[EF PPT] Failed to fetch app names:', err);
+    }
+    return _appNameCache;
+  }
+
+  function appLabel(uniquename) {
+    return (_appNameCache && _appNameCache.get(uniquename)) || uniquename;
   }
 
   async function doGoTo() {
@@ -329,10 +419,13 @@
 
     switch (selectedType) {
       case 'open-in': {
+        // Deliberately does NOT pass appuniquename: the app configured in the
+        // CURRENT environment has no guaranteed match in the TARGET one (different
+        // org, different solution deployment), and forcing a mismatched app causes
+        // D365 to throw an unhandled-exception error page. Omitting it lets the
+        // target org fall back to its own default/last-used app for the record.
         const ctx = parseRecordContext();
-        const uniquename = await resolveCurrentAppUniqueName();
         const qp = new URLSearchParams();
-        if (uniquename) qp.set('appuniquename', uniquename);
         qp.set('pagetype', 'entityrecord');
         if (ctx.etn) qp.set('etn', ctx.etn);
         if (ctx.id) qp.set('id', ctx.id);
@@ -348,10 +441,10 @@
           : target.url + '/tools/solution';
         break;
       case 'app': {
-        const dflt = CFG && CFG.settings && CFG.settings.defaultAppUniqueName;
-        targetUrl = dflt
-          ? target.url + '/main.aspx?appuniquename=' + encodeURIComponent(dflt)
-          : target.url + '/main.aspx';
+        const apps = configuredAppUniqueNames();
+        const uname = selectedAppUniqueName || apps[0];
+        if (!uname) return;
+        targetUrl = target.url + '/apps/uniquename/' + encodeURIComponent(uname);
         break;
       }
       case 'security':
@@ -530,6 +623,8 @@
     '.type-btn{padding:4px 9px;border-radius:14px;border:1px solid #cbd5e1;background:#fff;' +
       'cursor:pointer;font-size:11px;color:#475569;}' +
     '.type-btn.active{background:#1B3A6B;color:#fff;border-color:#1B3A6B;}' +
+    '.app-select{width:100%;padding:6px 8px;margin-bottom:10px;border-radius:6px;' +
+      'border:1px solid #cbd5e1;background:#fff;font-size:12px;color:#334155;}' +
     '.go-btn{width:100%;padding:8px;border:none;border-radius:8px;background:#1B3A6B;' +
       'color:#fff;cursor:pointer;font-size:13px;font-weight:600;}' +
     '.go-btn:hover{filter:brightness(1.1);}' +
@@ -607,6 +702,26 @@
       return '<button type="button" class="type-btn' + active + '" data-type="' + t.id + '">' + escHtml(t.label) + '</button>';
     }).join('');
 
+    // App dropdown — only shown when "App" is the selected Go-To type.
+    let appSelect = '';
+    if (selectedType === 'app') {
+      const apps = configuredAppUniqueNames();
+      if (apps.length) {
+        if (!selectedAppUniqueName || apps.indexOf(selectedAppUniqueName) === -1) {
+          selectedAppUniqueName = apps[0];
+        }
+        appSelect =
+          '<select class="app-select" id="ef-app-select">' +
+            apps.map(function (u) {
+              const sel = u === selectedAppUniqueName ? ' selected' : '';
+              return '<option value="' + escHtml(u) + '"' + sel + '>' + escHtml(appLabel(u)) + '</option>';
+            }).join('') +
+          '</select>';
+      } else {
+        appSelect = '<div class="empty" style="margin-bottom:10px;">No apps configured (settings.includedApps).</div>';
+      }
+    }
+
     // Tools grid
     const toolBtns = TOOLS.map(function (t) {
       return (
@@ -625,6 +740,7 @@
             '<div class="lbl">Go To</div>' +
             '<div class="envs" id="ef-envs">' + envChips + '</div>' +
             '<div class="types" id="ef-types">' + typeBtns + '</div>' +
+            appSelect +
             '<button type="button" class="go-btn" id="ef-go">Go →</button>' +
           '</div>' +
           '<div class="sect">' +
@@ -662,7 +778,12 @@
 
     const boltBtn = boltShadow.querySelector('#ef-bolt');
     const panel = panelShadow.querySelector('#ef-panel');
-    if (panelWasOpen) panel.classList.add('open');
+    if (panelWasOpen) {
+      panel.classList.add('open');
+      // innerHTML was replaced, so any inline top/right positioning from a
+      // previous positionPanel() call was lost along with the old element.
+      positionPanel();
+    }
 
     boltBtn.addEventListener('click', function () {
       const willOpen = !panel.classList.contains('open');
@@ -683,10 +804,25 @@
     panelShadow.querySelectorAll('.type-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         selectedType = btn.getAttribute('data-type');
-        panelShadow.querySelectorAll('.type-btn').forEach(function (b) { b.classList.remove('active'); });
-        btn.classList.add('active');
+        // Re-render: the "App" type shows an extra dropdown that only exists
+        // in the markup when selectedType === 'app', so a full rebuild is
+        // needed either way (adding or removing that element).
+        renderFlyout();
+        if (selectedType === 'app') {
+          ensureAppNames().then(function () {
+            if (selectedType === 'app') renderFlyout(); // refresh labels once friendly names arrive
+          });
+        }
       });
     });
+
+    // App dropdown (only present when selectedType === 'app')
+    const appSelectEl = panelShadow.querySelector('#ef-app-select');
+    if (appSelectEl) {
+      appSelectEl.addEventListener('change', function () {
+        selectedAppUniqueName = appSelectEl.value;
+      });
+    }
 
     // Go button
     panelShadow.querySelector('#ef-go').addEventListener('click', function () {

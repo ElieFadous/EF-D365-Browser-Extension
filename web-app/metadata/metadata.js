@@ -1334,7 +1334,8 @@ function _bridgeFetch(url, extraHeaders = {}, method = 'GET', body = null) {
       else reject(new Error(e.data.error || 'HTTP ' + e.data.status));
     }
     window.addEventListener('message', onMsg);
-    window.parent.postMessage({ __efppt: 'fetch', id, url, method, headers: extraHeaders, body }, '*');
+    // window.opener when popped out to its own tab; window.parent when embedded.
+    (window.opener || window.parent).postMessage({ __efppt: 'fetch', id, url, method, headers: extraHeaders, body }, '*');
   });
 }
 
