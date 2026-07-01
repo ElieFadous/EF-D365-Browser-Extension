@@ -4,20 +4,25 @@
  * Synchronises records between two D365 environments.
  * Steps: Environments → Table → Columns & N:N → Filter → Results
  *
- * Runs as an iframe opened by launcher.js (which runs in the D365 page context).
- * All D365 API calls are relayed via the postMessage bridge — no direct fetch and
- * no chrome.* APIs.
+ * Runs as an iframe/tab opened by launcher.js (which runs in the D365 page
+ * context). All D365 API calls are relayed via the postMessage bridge — no
+ * direct fetch and no chrome.* APIs.
  *
- * IMPORTANT LIMITATION:
- * The bridge (launcher.js on the source D365 page) can only relay same-origin calls.
- * Cross-environment sync (source ≠ target) is NOT supported in the web app — only
- * single-environment operations where source = target = the current D365 page.
+ * CROSS-ENVIRONMENT SYNC:
+ * launcher.js's own tab can only fetch its own (current) D365 origin directly
+ * — a different org is blocked by CORS, same as any other web page. When the
+ * target environment differs, launcher.js opens a second tab for it and
+ * relays requests there via postMessage once you click the EF PPT bookmark
+ * in that new tab (see "Connect Target Environment" below and
+ * bindConnectTarget()). Every _bridgeFetch() call is unaffected by this —
+ * launcher.js decides how to route each URL based on its origin.
  */
 
 // ─── Bridge fetch ───────────────────────────────────────────────────────────────
-// launcher.js (running in D365 context) relays this same-origin call with
-// credentials included, then posts back { __efppt: 'fetch-result', id, ok, data }.
-// Resolves with the parsed response body (caller reads .value etc. itself).
+// launcher.js (running in D365 context) relays this call — same-origin
+// directly, or via a connected target tab for a different environment — then
+// posts back { __efppt: 'fetch-result', id, ok, data }. Resolves with the
+// parsed response body (caller reads .value etc. itself).
 
 const _bridgeFetch = (url, extraHeaders = {}, method = 'GET', body = null) =>
   new Promise((resolve, reject) => {
@@ -43,6 +48,30 @@ const _bridgeFetch = (url, extraHeaders = {}, method = 'GET', body = null) =>
 // rejects on non-2xx, so a resolved promise means the record exists (200).
 const _bridgeExists = (url) =>
   _bridgeFetch(url).then(() => true).catch(() => false);
+
+// ─── Connect target environment ────────────────────────────────────────────────
+// Asks launcher.js to open (or reuse) a tab for `targetOrigin` and wait until
+// that tab's own launcher.js instance confirms its bridge is live (i.e. you've
+// clicked the EF PPT bookmark there). Resolves once connected; rejects on
+// timeout or if the pop-up was blocked.
+
+const _bridgeConnectTarget = (targetOrigin) =>
+  new Promise((resolve, reject) => {
+    const id    = Math.random().toString(36).slice(2) + Date.now();
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onMsg);
+      reject(new Error('Timed out waiting for the target tab to connect.'));
+    }, 130_000);
+    function onMsg(e) {
+      if (!e.data || e.data.__efppt !== 'connect-target-result' || e.data.id !== id) return;
+      clearTimeout(timer);
+      window.removeEventListener('message', onMsg);
+      if (e.data.ok) resolve();
+      else reject(new Error(e.data.error || 'Could not connect to the target environment.'));
+    }
+    window.addEventListener('message', onMsg);
+    (window.opener || window.parent).postMessage({ __efppt: 'connect-target', id, targetOrigin }, '*');
+  });
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 // Prefer the `cfg` URL param (base64 JSON) that launcher.js embeds when opening
@@ -75,6 +104,11 @@ let selectedM2m    = null;   // null = all; otherwise Set of schemaName
 let filterConditions = [];   // [{ attribute, operator, value }]
 let syncResults    = [];     // accumulates per-record results
 let currentStep    = 1;
+
+// Cross-environment connection state — the origin currently connected via a
+// second tab (see _bridgeConnectTarget), or null if none/not yet connected.
+let _connectedTargetOrigin = null;
+let _connectingTarget      = false;
 
 // Sort state for summary table
 let sortCol = 'name', sortDir = 'asc';
@@ -134,18 +168,20 @@ function populateEnvDropdowns(defaultSourceUrl = '') {
 
   if (defaultSourceUrl) {
     srcSel.value = defaultSourceUrl;
-    // In single-env mode the only supported target is the source — default it too.
+    // Convenience default for the common same-env case — the user can still
+    // pick a different target, which will prompt the cross-env connect flow.
     tgtSel.value = defaultSourceUrl;
   }
 
   srcSel.addEventListener('change', validateStep1);
   tgtSel.addEventListener('change', validateStep1);
+  document.getElementById('btn-connect-target').addEventListener('click', onConnectTargetClick);
 
   // Run validation immediately so Next button state reflects the pre-selection
   validateStep1();
 }
 
-/** Current D365 origin the bridge can reach (the page hosting the launcher). */
+/** Current D365 origin the bridge can reach directly (the page hosting the launcher). */
 function _currentOrigin() {
   const fromParam = (new URLSearchParams(location.search).get('env') ?? '').replace(/\/$/, '');
   if (fromParam) { try { return new URL(fromParam).origin; } catch { /* fall through */ } }
@@ -159,6 +195,26 @@ function _sameOrigin(envUrl) {
   try { return new URL(envUrl).origin === cur; } catch { return false; }
 }
 
+function _originOf(envUrl) {
+  try { return new URL(envUrl).origin; } catch { return ''; }
+}
+
+function _hideConnectPanel() {
+  document.getElementById('connect-target-panel').classList.add('hidden');
+}
+
+function _showConnectPanel(message, { connecting = false, error = false } = {}) {
+  const panel = document.getElementById('connect-target-panel');
+  const text  = document.getElementById('connect-target-text');
+  const btn   = document.getElementById('btn-connect-target');
+  panel.classList.remove('hidden');
+  panel.classList.toggle('alert--error', error);
+  panel.classList.toggle('alert--warning', !error);
+  text.textContent = message;
+  btn.disabled = connecting;
+  btn.textContent = connecting ? 'Connecting…' : 'Connect Target Environment';
+}
+
 function validateStep1() {
   const src     = document.getElementById('source-env').value;
   const tgt     = document.getElementById('target-env').value;
@@ -168,35 +224,69 @@ function validateStep1() {
   // Nothing selected yet → disable Next, clear error.
   if (!src || !tgt) {
     errEl.classList.add('hidden');
+    _hideConnectPanel();
     nextBtn.disabled = true;
     return;
   }
 
-  // Cross-environment sync is impossible via the same-origin bridge.
-  if (src !== tgt) {
-    errEl.textContent =
-      'Cross-environment sync is not supported in the web app version. ' +
-      'To sync between environments, use the browser extension. ' +
-      'You can sync within the same environment (source = target = current page).';
-    errEl.classList.remove('hidden');
-    nextBtn.disabled = true;
-    return;
-  }
-
-  // Single-env mode: the selected env must be the D365 page the launcher runs on,
-  // otherwise the bridge cannot reach it (cross-origin).
+  // The source must be the D365 page the launcher runs on — that's the only
+  // origin this tab's own bridge can reach directly without a second tab.
   if (!_sameOrigin(src)) {
     errEl.textContent =
-      'The selected environment is not the current D365 page. ' +
-      'The web app can only sync within the environment you launched it from. ' +
-      'Open this tool from the environment you want to sync, or use the browser extension.';
+      'The source environment must be the current D365 page. ' +
+      'Open this tool from the environment you want to read from.';
     errEl.classList.remove('hidden');
+    _hideConnectPanel();
     nextBtn.disabled = true;
     return;
   }
 
   errEl.classList.add('hidden');
-  nextBtn.disabled = false;
+
+  // Same-environment sync — no second tab needed.
+  if (_sameOrigin(tgt)) {
+    _hideConnectPanel();
+    nextBtn.disabled = false;
+    return;
+  }
+
+  // Cross-environment — needs a connected second tab for the target origin.
+  const tgtOrigin = _originOf(tgt);
+  if (_connectedTargetOrigin === tgtOrigin) {
+    _hideConnectPanel();
+    nextBtn.disabled = false;
+    return;
+  }
+
+  const tgtName = environments.find(e => e.url === tgt)?.name ?? tgt;
+  _showConnectPanel(
+    `Cross-environment sync needs a live connection to ${tgtName}. Click Connect, then click the ` +
+    `EF PPT bookmark in the new tab that opens — it will confirm here automatically once connected.`
+  );
+  nextBtn.disabled = true;
+}
+
+async function onConnectTargetClick() {
+  const tgt = document.getElementById('target-env').value;
+  if (!tgt) return;
+  const tgtOrigin = _originOf(tgt);
+  const tgtName   = environments.find(e => e.url === tgt)?.name ?? tgt;
+
+  _connectingTarget = true;
+  _showConnectPanel(
+    `Waiting for the new tab — click the EF PPT bookmark there to connect to ${tgtName}…`,
+    { connecting: true }
+  );
+
+  try {
+    await _bridgeConnectTarget(tgtOrigin);
+    _connectedTargetOrigin = tgtOrigin;
+    _connectingTarget = false;
+    validateStep1();
+  } catch (err) {
+    _connectingTarget = false;
+    _showConnectPanel(err.message || 'Could not connect to the target environment.', { error: true });
+  }
 }
 
 // ─── Step bindings ────────────────────────────────────────────────────────────
@@ -208,7 +298,8 @@ function bindStep1() {
     sourceEnv = environments.find(e => e.url === srcUrl);
     targetEnv = environments.find(e => e.url === tgtUrl);
 
-    // No proxy tab to open — the bridge talks to the current (source) origin.
+    // No proxy tab to open — the bridge talks to the current (source) origin
+    // directly, and to the target's own connected tab for cross-env syncs.
     goToStep(2);
     loadEntityList();
   });
@@ -928,7 +1019,8 @@ async function runViewUpdates() {
   setProgress(0, 'Counting records…');
 
   const apiBase       = `${sourceEnv.url}/api/data/${settings.apiVersion}`;
-  // Single-env mode: target === source. The bridge reaches both the same way.
+  // _bridgeFetch routes each call based on the URL's origin — same-origin
+  // directly, or via the connected target tab when target !== source.
   const targetApiBase = `${targetEnv.url}/api/data/${settings.apiVersion}`;
 
   try {

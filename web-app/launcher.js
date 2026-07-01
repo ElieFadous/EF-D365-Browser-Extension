@@ -129,6 +129,46 @@
   let selectedAppUniqueName = null;
 
   // ════════════════════════════════════════════════════════════════════
+  //  CROSS-ENVIRONMENT BRIDGE
+  // ════════════════════════════════════════════════════════════════════
+  // Plain page JS cannot fetch a DIFFERENT D365 org's API with credentials —
+  // that's blocked by CORS (D365 grants it to nobody; browser extensions only
+  // bypass this via declared host_permissions, which a bookmarklet has no
+  // equivalent for). Workaround: open a second tab for the target org and let
+  // ITS OWN launcher.js instance do its own same-origin fetch there, relaying
+  // the request/response between the two tabs via postMessage + the window
+  // handle from window.open() (postMessage works cross-origin even though
+  // direct DOM/fetch access does not). See "Connect Target Environment" in
+  // Data Sync, which drives this via the 'connect-target' message below.
+  const _targetWindows  = new Map(); // origin -> WindowProxy (opened by this tab)
+  const _targetReady    = new Set(); // origins confirmed alive (launcher-ready received)
+  const _connectWaiters = new Map(); // origin -> [{ id, source }]
+  const _pendingRelays  = new Map(); // fetch id -> original requester's window (e.source)
+
+  function _originOf(url) {
+    try { return new URL(url).origin; } catch (_) { return ''; }
+  }
+
+  // If THIS tab was itself opened by another EF PPT tab (via the
+  // connect-target flow below), announce that this origin's bridge is live.
+  if (window.opener) {
+    try {
+      window.opener.postMessage({ __efppt: 'launcher-ready', origin: window.location.origin }, '*');
+    } catch (_) { /* opener gone or restricted — harmless to skip */ }
+  }
+
+  function _resolveConnectWaiters(origin, ok, error) {
+    if (ok) _targetReady.add(origin);
+    const waiters = _connectWaiters.get(origin) || [];
+    _connectWaiters.delete(origin);
+    waiters.forEach(function (w) {
+      if (w.source && w.source.postMessage) {
+        w.source.postMessage({ __efppt: 'connect-target-result', id: w.id, ok: ok, error: error }, '*');
+      }
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════
   //  FETCH BRIDGE
   // ════════════════════════════════════════════════════════════════════
   window.addEventListener('message', async function (e) {
@@ -137,6 +177,51 @@
 
     if (msg.__efppt === 'close-overlay') {
       closeTool();
+      return;
+    }
+
+    // A target tab we opened has confirmed its own bridge is live.
+    if (msg.__efppt === 'launcher-ready' && msg.origin) {
+      _resolveConnectWaiters(msg.origin, true, null);
+      return;
+    }
+
+    // A reply relayed back FROM a target tab we forwarded a fetch to —
+    // forward it on to the ORIGINAL requester (e.g. the Data Sync iframe).
+    if (msg.__efppt === 'fetch-result' && _pendingRelays.has(msg.id)) {
+      const originalSource = _pendingRelays.get(msg.id);
+      _pendingRelays.delete(msg.id);
+      if (originalSource && originalSource.postMessage) originalSource.postMessage(msg, '*');
+      return;
+    }
+
+    // A tool (Data Sync) asking us to open + connect a target environment tab.
+    if (msg.__efppt === 'connect-target') {
+      const origin = _originOf(msg.targetOrigin);
+      const reply = function (ok, error) {
+        if (e.source && e.source.postMessage) {
+          e.source.postMessage({ __efppt: 'connect-target-result', id: msg.id, ok: ok, error: error }, '*');
+        }
+      };
+      if (!origin) { reply(false, 'Invalid target environment URL.'); return; }
+      const existing = _targetWindows.get(origin);
+      if (_targetReady.has(origin) && existing && !existing.closed) { reply(true, null); return; }
+      const winName = 'efppt_target_' + origin.replace(/[^a-z0-9]/gi, '_');
+      let win;
+      try { win = window.open(origin, winName); }
+      catch (err) { reply(false, 'Could not open a tab for the target environment: ' + err.message); return; }
+      if (!win) { reply(false, 'The browser blocked the new tab. Allow pop-ups for this site and try again.'); return; }
+      _targetWindows.set(origin, win);
+      const waiters = _connectWaiters.get(origin) || [];
+      waiters.push({ id: msg.id, source: e.source });
+      _connectWaiters.set(origin, waiters);
+      // Give the user time to switch tabs and click the EF PPT bookmark there.
+      setTimeout(function () {
+        if (!_targetReady.has(origin)) {
+          _resolveConnectWaiters(origin, false,
+            'Timed out waiting for the target tab. Click the EF PPT bookmark in the new tab, then try again.');
+        }
+      }, 120000);
       return;
     }
 
@@ -149,6 +234,31 @@
         source.postMessage(Object.assign({ __efppt: 'fetch-result', id }, payload), '*');
       }
     };
+
+    // Cross-environment: this tab's origin can't reach another org's API
+    // directly, so relay through a previously connected target tab instead.
+    const urlOrigin = _originOf(msg.url);
+    if (urlOrigin && urlOrigin !== window.location.origin) {
+      const targetWin = _targetWindows.get(urlOrigin);
+      if (!_targetReady.has(urlOrigin) || !targetWin || targetWin.closed) {
+        reply({ ok: false, status: 0, error: 'Target environment (' + urlOrigin + ') is not connected. Use "Connect Target Environment" first.' });
+        return;
+      }
+      _pendingRelays.set(id, source);
+      setTimeout(function () {
+        if (_pendingRelays.has(id)) {
+          _pendingRelays.delete(id);
+          reply({ ok: false, status: 0, error: 'Timed out waiting for the target tab to respond.' });
+        }
+      }, 30000);
+      try {
+        targetWin.postMessage(msg, '*'); // forwarded as-is; target's own bridge replies with the same id
+      } catch (err) {
+        _pendingRelays.delete(id);
+        reply({ ok: false, status: 0, error: 'Could not reach the target tab: ' + err.message });
+      }
+      return;
+    }
 
     try {
       const headers = Object.assign(
