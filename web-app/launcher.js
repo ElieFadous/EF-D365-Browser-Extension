@@ -1600,7 +1600,10 @@
         );
       }).join('');
     } else {
-      envChips = '<div class="empty">No environments configured.</div>';
+      // Bookmarklets snapshot config at drag-time and can't "phone home" for
+      // updates — the most common reason this is empty is a bookmark dragged
+      // before any environments existed (or before a later edit).
+      envChips = '<div class="empty">No environments configured. If you\'ve already added some on the web app, drag a fresh bookmark to pick them up.</div>';
     }
 
     // Type toggles
