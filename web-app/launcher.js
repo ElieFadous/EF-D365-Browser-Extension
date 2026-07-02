@@ -1320,11 +1320,46 @@
   let boltShadow, panelShadow, panelHost;
   let _inToolbar = false;
 
+  // True on any Dynamics 365 page — via the client API global once the page
+  // has loaded, or the org hostname pattern otherwise (covers the moment
+  // right after injection, before Xrm exists yet). Deliberately independent
+  // of whether the current org is one of the user's *configured*
+  // environments — the launcher should still work on an unconfigured org.
+  function _isDynamicsPage() {
+    try { if (window.Xrm && window.Xrm.Utility) return true; } catch (_) { /* ignore */ }
+    return /(^|\.)crm\d*\.dynamics\.com$/i.test(window.location.hostname);
+  }
+
+  function _findCommandBar() {
+    return document.querySelector('ul[data-id="CommandBar"]');
+  }
+
+  // Re-parents the floating bolt button into the D365 command bar once it
+  // appears. attachShadow() is intrinsic to the element it was called on, so
+  // moving that same <div> into a new wrapper keeps its shadow root (and
+  // everything rendered inside it) intact — no need to rebuild it.
+  function _upgradeToToolbar(cmdBar) {
+    if (_inToolbar) return;
+    const inner = host; // the floating mode's shadow-hosting <div>
+    const li = document.createElement('li');
+    li.id = '__ef-ppt-host';
+    li.setAttribute('role', 'presentation');
+    li.setAttribute('style', 'display:flex;align-items:center;list-style:none;position:relative;');
+    inner.removeAttribute('id');
+    inner.setAttribute('style', '');
+    if (inner.parentNode) inner.parentNode.removeChild(inner);
+    li.appendChild(inner);
+    cmdBar.appendChild(li);
+    host = li;
+    _inToolbar = true;
+    renderFlyout();
+  }
+
   if (!host) {
     // Prefer injecting into the D365 global command bar so the button sits
     // alongside New / Notifications / Settings / Help instead of overlapping
     // the user-profile icon in the top-right corner.
-    const cmdBar = document.querySelector('ul[data-id="CommandBar"]');
+    const cmdBar = _findCommandBar();
     const boltShadowHost = document.createElement('div');
     if (cmdBar) {
       host = document.createElement('li');
@@ -1335,10 +1370,29 @@
       cmdBar.appendChild(host);
       _inToolbar = true;
     } else {
+      // No command bar yet — show the floating button immediately (so
+      // something is ALWAYS visible right away, on any page) rather than
+      // waiting. If this genuinely is a D365 page that just hasn't finished
+      // rendering its command bar (SPA hydration), watch for it and move the
+      // button in once it shows up instead of leaving it stuck floating for
+      // the rest of the session; a plain non-D365 page skips the watch
+      // entirely and keeps the floating button, as intended.
       host = boltShadowHost;
       host.id = '__ef-ppt-host';
       host.setAttribute('style', 'all:initial;position:fixed;top:8px;right:8px;z-index:2147483647;');
       document.body.appendChild(host);
+
+      if (_isDynamicsPage()) {
+        const observer = new MutationObserver(function () {
+          const bar = _findCommandBar();
+          if (bar) {
+            observer.disconnect();
+            _upgradeToToolbar(bar);
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        setTimeout(function () { observer.disconnect(); }, 8000);
+      }
     }
     boltShadow = boltShadowHost.attachShadow({ mode: 'open' });
 
@@ -1368,25 +1422,31 @@
     panel.classList.remove('open');
   }, true);
 
-  const BOLT_STYLES =
-    ':host,*{box-sizing:border-box;}' +
-    '.wrap{font-family:Segoe UI,system-ui,sans-serif;}' +
-    (_inToolbar
-      // Toolbar mode: transparent button that blends with the D365 header
-      ? '.bolt-btn{width:36px;height:36px;background:transparent;color:#fff;border:none;' +
-          'border-radius:6px;cursor:pointer;display:flex;align-items:center;' +
-          'justify-content:center;padding:0;position:relative;}' +
-        '.bolt-btn:hover{background:rgba(255,255,255,.15);}' +
-        '.env-dot{position:absolute;bottom:3px;right:3px;width:7px;height:7px;' +
-          'border-radius:50%;pointer-events:none;border:1.5px solid rgba(0,0,0,.25);}'
-      // Fallback: fixed pill in top-right corner
-      : '.bolt-btn{width:36px;height:36px;' +
-          'background:#1B3A6B;color:#fff;border:none;border-radius:8px;cursor:pointer;' +
-          'display:flex;align-items:center;justify-content:center;' +
-          'border-left:4px solid #888;box-shadow:0 2px 8px rgba(0,0,0,.3);padding:0;position:relative;}' +
-        '.bolt-btn:hover{filter:brightness(1.1);}' +
-        '.env-dot{position:absolute;bottom:3px;right:3px;width:7px;height:7px;' +
-          'border-radius:50%;pointer-events:none;border:1.5px solid rgba(0,0,0,.25);}');
+  // A function (not a precomputed constant) because _inToolbar can flip from
+  // false to true at runtime via _upgradeToToolbar(), after this file's top
+  // level has already run once — the styles must reflect *current* mode.
+  function buildBoltStyles() {
+    return (
+      ':host,*{box-sizing:border-box;}' +
+      '.wrap{font-family:Segoe UI,system-ui,sans-serif;}' +
+      (_inToolbar
+        // Toolbar mode: transparent button that blends with the D365 header
+        ? '.bolt-btn{width:36px;height:36px;background:transparent;color:#fff;border:none;' +
+            'border-radius:6px;cursor:pointer;display:flex;align-items:center;' +
+            'justify-content:center;padding:0;position:relative;}' +
+          '.bolt-btn:hover{background:rgba(255,255,255,.15);}' +
+          '.env-dot{position:absolute;bottom:3px;right:3px;width:7px;height:7px;' +
+            'border-radius:50%;pointer-events:none;border:1.5px solid rgba(0,0,0,.25);}'
+        // Fallback: fixed pill in top-right corner
+        : '.bolt-btn{width:36px;height:36px;' +
+            'background:#1B3A6B;color:#fff;border:none;border-radius:8px;cursor:pointer;' +
+            'display:flex;align-items:center;justify-content:center;' +
+            'border-left:4px solid #888;box-shadow:0 2px 8px rgba(0,0,0,.3);padding:0;position:relative;}' +
+          '.bolt-btn:hover{filter:brightness(1.1);}' +
+          '.env-dot{position:absolute;bottom:3px;right:3px;width:7px;height:7px;' +
+            'border-radius:50%;pointer-events:none;border:1.5px solid rgba(0,0,0,.25);}')
+    );
+  }
 
   const PANEL_STYLES =
     ':host,*{box-sizing:border-box;}' +
@@ -1630,7 +1690,7 @@
       return p ? p.classList.contains('open') : false;
     })();
 
-    boltShadow.innerHTML = '<style>' + BOLT_STYLES + '</style>' + buildBoltMarkup();
+    boltShadow.innerHTML = '<style>' + buildBoltStyles() + '</style>' + buildBoltMarkup();
     panelShadow.innerHTML = '<style>' + PANEL_STYLES + '</style>' + buildPanelMarkup();
 
     const boltBtn = boltShadow.querySelector('#ef-bolt');
