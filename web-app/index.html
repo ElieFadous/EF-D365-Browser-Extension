@@ -710,7 +710,7 @@
         cfgPart +
         "var s=document.createElement('script');" +
         "s.src='https://eliefadous.github.io/EF-D365-Browser-Extension/web-app/launcher.js?v='+Date.now();" +
-        "s.onerror=function(){alert('Could not load EF PPT. Check your connection.');};" +
+        "s.onerror=function(){alert('Unable to load EF PPT from this page. It may be blocking external scripts via its security policy (common on non-Dynamics 365 pages). Try it on a Dynamics 365 page instead.');};" +
         "document.head.appendChild(s);" +
       "})();"
     );
