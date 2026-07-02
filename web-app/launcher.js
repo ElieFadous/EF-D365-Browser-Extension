@@ -1813,8 +1813,10 @@
   }
 
   // ── Bootstrap ───────────────────────────────────────────────────────
+  // No automatic "no config found" prompt — the flyout renders regardless
+  // (with an empty-state message under Go To if nothing's configured yet)
+  // and the user can open Config from the footer link whenever they want.
   ensureRecordDetailsLoaded(parseRecordContext());
   renderFlyout();
-  if (!CFG) openConfigEditor();
 
 })();
