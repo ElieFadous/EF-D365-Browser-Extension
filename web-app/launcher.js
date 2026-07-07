@@ -546,9 +546,12 @@
   //  GO TO  logic
   // ════════════════════════════════════════════════════════════════════
   function parseRecordContext() {
-    // Read entity + record id from the current D365 URL.
+    // Read pagetype/entity/record id from the current D365 URL — pagetype
+    // distinguishes a record form (has an id) from a view/list (etn only,
+    // no id), which Go To needs to build a correct target URL for either.
     const p = new URLSearchParams(window.location.search);
     return {
+      pagetype: p.get('pagetype') || '',
       etn: p.get('etn') || '',
       id: (p.get('id') || '').replace(/[{}]/g, '')
     };
@@ -611,22 +614,45 @@
 
     switch (selectedType) {
       case 'open-in': {
-        // Deliberately does NOT pass appuniquename: the app configured in the
-        // CURRENT environment has no guaranteed match in the TARGET one (different
-        // org, different solution deployment), and forcing a mismatched app causes
-        // D365 to throw an unhandled-exception error page. Omitting it lets the
-        // target org fall back to its own default/last-used app for the record.
         const ctx = parseRecordContext();
         const qp = new URLSearchParams();
-        qp.set('pagetype', 'entityrecord');
-        if (ctx.etn) qp.set('etn', ctx.etn);
-        if (ctx.id) qp.set('id', ctx.id);
-        targetUrl = target.url + '/main.aspx?' + qp.toString();
+        if (ctx.pagetype === 'entitylist') {
+          // A view has no record id, and unlike a record form D365 can't
+          // resolve a bare list URL without a Model Driven App context (it
+          // falls back to a blank "new record" form instead) — so route it
+          // through the configured default app, same as the "App" Go-To type.
+          qp.set('pagetype', 'entitylist');
+          if (ctx.etn) qp.set('etn', ctx.etn);
+          const uname = configuredAppUniqueNames()[0];
+          targetUrl = uname
+            ? target.url + '/apps/uniquename/' + encodeURIComponent(uname) + '/main.aspx?' + qp.toString()
+            : target.url + '/main.aspx?' + qp.toString();
+        } else {
+          // Deliberately does NOT pass appuniquename: the app configured in the
+          // CURRENT environment has no guaranteed match in the TARGET one (different
+          // org, different solution deployment), and forcing a mismatched app causes
+          // D365 to throw an unhandled-exception error page. Omitting it lets the
+          // target org fall back to its own default/last-used app for the record.
+          qp.set('pagetype', 'entityrecord');
+          if (ctx.etn) qp.set('etn', ctx.etn);
+          if (ctx.id) qp.set('id', ctx.id);
+          targetUrl = target.url + '/main.aspx?' + qp.toString();
+        }
         break;
       }
-      case 'api':
-        targetUrl = target.url + '/api/data/' + ver + '/';
+      case 'api': {
+        // Deep-link to the current table's entity set (not just the API
+        // root) when Go To is used from a record form or a view. Resolved
+        // against the CURRENT (source) environment — same-origin, no bridge
+        // needed — since entity set names are the same logical schema across
+        // environments, same assumption "Open In" already relies on.
+        const ctx = parseRecordContext();
+        const entitySet = ctx.etn ? await fetchEntitySetName(window.location.origin, ctx.etn) : null;
+        targetUrl = entitySet
+          ? target.url + '/api/data/' + ver + '/' + entitySet
+          : target.url + '/api/data/' + ver + '/';
         break;
+      }
       case 'solutions':
         targetUrl = target.powerAppsId
           ? 'https://make.powerapps.com/environments/' + target.powerAppsId + '/solutions'
