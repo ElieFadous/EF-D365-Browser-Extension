@@ -779,11 +779,21 @@
   function buildRecordPaneMarkup() {
     if (!_rdState) return '';
 
+    // .rd-ftr mirrors the right pane's .ftr — same padding, pinned to the
+    // absolute bottom the same way (flex:1 on the scrollable body above it
+    // pushes this down regardless of how tall the cards/clone content gets).
+    const ftrHtml =
+      '<div class="rd-ftr">' +
+        '<button type="button" class="rd-meta-btn" id="ef-rd-open-metadata">' +
+          (TOOL_ICONS.metadata || '') + ' Open in Metadata Browser' +
+        '</button>' +
+      '</div>';
+
     if (_rdState.status === 'loading') {
-      return '<div class="rd-state"><span class="rd-mini-spinner"></span> Loading record details…</div>';
+      return '<div class="rd-pane-body"><div class="rd-state"><span class="rd-mini-spinner"></span> Loading record details…</div></div>' + ftrHtml;
     }
     if (_rdState.status === 'error') {
-      return '<div class="rd-state rd-state--error">Failed to load: ' + escHtml(_rdState.error) + '</div>';
+      return '<div class="rd-pane-body"><div class="rd-state rd-state--error">Failed to load: ' + escHtml(_rdState.error) + '</div></div>' + ftrHtml;
     }
 
     const env = currentEnv(CFG);
@@ -878,14 +888,7 @@
       html += '</div>';
     }
 
-    // ── Open in Metadata Browser ─────────────────────────────────────────
-    html += (
-      '<button type="button" class="rd-meta-btn" id="ef-rd-open-metadata">' +
-        (TOOL_ICONS.metadata || '') + ' Open in Metadata Browser' +
-      '</button>'
-    );
-
-    return html;
+    return '<div class="rd-pane-body">' + html + '</div>' + ftrHtml;
   }
 
   function onRdCloneTargetChange(selectEl) {
@@ -1492,9 +1495,12 @@
     '.panel.panel--wide{width:601px;display:none;flex-direction:row;align-items:stretch;' +
       'max-height:min(620px,calc(100vh - 32px));}' +
     '.panel.panel--wide.open{display:flex;}' +
-    '.rd-pane{flex:0 0 300px;max-width:300px;overflow-y:auto;padding:12px 14px;}' +
+    '.rd-pane{flex:0 0 300px;max-width:300px;display:flex;flex-direction:column;overflow:hidden;}' +
+    '.rd-pane-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:12px 14px;}' +
+    '.rd-ftr{flex:0 0 auto;height:32px;box-sizing:border-box;padding:8px 14px;background:#f8fafc;display:flex;align-items:center;}' +
     '.pane-divider{flex:0 0 1px;align-self:stretch;background:#e2e8f0;}' +
-    '.main-pane{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;overflow-y:auto;}' +
+    '.main-pane{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;overflow:hidden;}' +
+    '.main-pane-body{flex:1 1 auto;min-height:0;overflow-y:auto;}' +
     '.hdr{padding:12px 14px;border-bottom:1px solid #e2e8f0;}' +
     '.hdr-row{display:flex;align-items:center;gap:8px;}' +
     '.hdr-name{font-weight:700;font-size:14px;}' +
@@ -1524,7 +1530,7 @@
     '.tool-btn:hover{background:#eef2ff;border-color:#c7d2fe;}' +
     '.tool-btn svg{flex:0 0 auto;color:#1B3A6B;width:15px;height:15px;}' +
     '.tool-btn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}' +
-    '.ftr{padding:8px 14px;background:#f8fafc;display:flex;align-items:center;justify-content:space-between;}' +
+    '.ftr{height:32px;box-sizing:border-box;padding:8px 14px;background:#f8fafc;display:flex;align-items:center;justify-content:space-between;}' +
     '.cfg-link{font-size:12px;color:#1B3A6B;cursor:pointer;text-decoration:none;background:none;border:none;padding:0;}' +
     '.cfg-link:hover{text-decoration:underline;}' +
     '.rm-link{font-size:12px;color:#94a3b8;cursor:pointer;background:none;border:none;padding:0;}' +
@@ -1577,11 +1583,11 @@
     '.rd-link-btn{background:none;border:none;padding:0;font-size:11px;font-weight:600;color:#b91c1c;' +
       'cursor:pointer;text-decoration:underline;text-underline-offset:2px;flex-shrink:0;}' +
     '.rd-link-btn:hover{color:#7f1d1d;}' +
-    '.rd-meta-btn{display:flex;align-items:center;gap:6px;width:100%;margin-top:10px;padding:0;' +
-      'background:none;border:none;cursor:pointer;font-size:12px;font-weight:600;color:#2855a0;' +
+    '.rd-meta-btn{display:flex;align-items:center;gap:5px;padding:0;' +
+      'background:none;border:none;cursor:pointer;font-size:11px;font-weight:600;color:#2855a0;' +
       'text-decoration:underline;text-underline-offset:2px;}' +
     '.rd-meta-btn:hover{color:#1B3A6B;}' +
-    '.rd-meta-btn svg{width:14px;height:14px;flex-shrink:0;}' +
+    '.rd-meta-btn svg{width:12px;height:12px;flex-shrink:0;}' +
     '.rd-mini-spinner{display:inline-block;width:9px;height:9px;border:1.5px solid rgba(27,58,107,.25);' +
       'border-top-color:#1B3A6B;border-radius:50%;vertical-align:-1px;animation:rdspin .7s linear infinite;}' +
     '.rd-clone-btn .rd-mini-spinner{border-color:rgba(255,255,255,.5);border-top-color:#fff;}' +
@@ -1680,18 +1686,24 @@
       );
     }).join('');
 
+    // The scrollable part is wrapped separately from .ftr so the footer stays
+    // pinned to the true bottom of the pane (flex:1 on the body consumes all
+    // remaining space, pushing .ftr down) instead of just trailing whatever
+    // height the content happens to add up to.
     const mainInner =
-      '<div class="hdr">' + hdr + '</div>' +
-      '<div class="sect">' +
-        '<div class="lbl">Go To</div>' +
-        '<div class="envs" id="ef-envs">' + envChips + '</div>' +
-        '<div class="types" id="ef-types">' + typeBtns + '</div>' +
-        appSelect +
-        '<button type="button" class="go-btn" id="ef-go">Go →</button>' +
-      '</div>' +
-      '<div class="sect">' +
-        '<div class="lbl">Tools</div>' +
-        '<div class="tools-grid" id="ef-tools">' + toolBtns + '</div>' +
+      '<div class="main-pane-body">' +
+        '<div class="hdr">' + hdr + '</div>' +
+        '<div class="sect">' +
+          '<div class="lbl">Go To</div>' +
+          '<div class="envs" id="ef-envs">' + envChips + '</div>' +
+          '<div class="types" id="ef-types">' + typeBtns + '</div>' +
+          appSelect +
+          '<button type="button" class="go-btn" id="ef-go">Go →</button>' +
+        '</div>' +
+        '<div class="sect">' +
+          '<div class="lbl">Tools</div>' +
+          '<div class="tools-grid" id="ef-tools">' + toolBtns + '</div>' +
+        '</div>' +
       '</div>' +
       '<div class="ftr">' +
         '<button type="button" class="cfg-link" id="ef-cfg">⚙ Config</button>' +
