@@ -178,102 +178,6 @@
     try { return new URL(url).origin; } catch (_) { return ''; }
   }
 
-  // ── Known targets (survives reload) ─────────────────────────────────────
-  // _targetWindows/_targetReady above are pure in-memory state — wiped by any
-  // reload of THIS tab (or the browser discarding it in the background),
-  // even though the target tab itself, still open with its own launcher.js
-  // running, hasn't gone anywhere. Remembering which origins we've
-  // successfully connected to before (per this source origin) lets us
-  // silently re-attach to that same still-open tab by the window NAME we
-  // gave it — window.open('', name) returns a live handle to an existing
-  // same-named window without navigating it — instead of forcing the whole
-  // "open a new tab, click the bookmark there again" flow every time.
-  const KNOWN_TARGETS_KEY = 'ef_ppt_known_targets';
-
-  function _loadKnownTargets() {
-    try {
-      const raw = localStorage.getItem(KNOWN_TARGETS_KEY);
-      const list = raw ? JSON.parse(raw) : [];
-      return Array.isArray(list) ? list : [];
-    } catch (_) { return []; }
-  }
-
-  function _rememberKnownTarget(origin) {
-    try {
-      const list = _loadKnownTargets().filter(function (o) { return o !== origin; });
-      list.unshift(origin);
-      localStorage.setItem(KNOWN_TARGETS_KEY, JSON.stringify(list.slice(0, 10)));
-    } catch (_) { /* best-effort — worst case we just skip silent reattach next time */ }
-  }
-
-  function _winNameFor(origin) {
-    return 'efppt_target_' + origin.replace(/[^a-z0-9]/gi, '_');
-  }
-
-  /**
-   * Tries to silently re-attach to an already-open, already-launcher-loaded
-   * tab for `origin` — no popup, no user action. Resolves true if it's live
-   * and responded to a ping; false if there's nothing there (and cleans up
-   * the empty placeholder window.open() creates when no such window exists).
-   */
-  function _tryReattach(origin) {
-    return new Promise(function (resolve) {
-      const winName = _winNameFor(origin);
-      let win;
-      try { win = window.open('', winName); }
-      catch (_) { resolve(false); return; }
-      if (!win) { resolve(false); return; } // popup blocked — nothing we can do silently
-
-      // window.open('', name) creates a fresh about:blank window when none by
-      // that name exists yet. A fresh window is same-origin with us (readable
-      // location), so this distinguishes "nothing there" from "re-attached to
-      // an existing tab already navigated to the target origin" (cross-origin
-      // now, so reading .location throws) without ever needing DOM access.
-      let isFreshBlank = false;
-      try { isFreshBlank = win.location.href === 'about:blank'; } catch (_) { isFreshBlank = false; }
-      if (isFreshBlank) {
-        try { win.close(); } catch (_) { /* ignore */ }
-        resolve(false);
-        return;
-      }
-
-      const id = Math.random().toString(36).slice(2) + Date.now();
-      const timer = setTimeout(function () {
-        window.removeEventListener('message', onMsg);
-        resolve(false);
-      }, 1500);
-      function onMsg(e) {
-        if (!e.data || e.data.__efppt !== 'pong' || e.data.id !== id) return;
-        clearTimeout(timer);
-        window.removeEventListener('message', onMsg);
-        _targetWindows.set(origin, win);
-        _targetReady.add(origin);
-        _rememberKnownTarget(origin);
-        resolve(true);
-      }
-      window.addEventListener('message', onMsg);
-      try {
-        win.postMessage({ __efppt: 'ping', id: id }, '*');
-      } catch (_) {
-        clearTimeout(timer);
-        window.removeEventListener('message', onMsg);
-        resolve(false);
-      }
-    });
-  }
-
-  /** Silently re-attaches to every origin we've connected to before from this source. Fire-and-forget. */
-  function _reattachKnownTargets() {
-    const known = _loadKnownTargets();
-    if (!known.length) return;
-    known.forEach(function (origin) {
-      if (_targetReady.has(origin)) return;
-      _tryReattach(origin).then(function (ok) {
-        if (ok) renderFlyout(); // reflect the now-connected state wherever the UI shows it
-      });
-    });
-  }
-
   // If THIS tab was itself opened by another EF PPT tab (via the
   // connect-target flow below), announce that this origin's bridge is live.
   if (window.opener) {
@@ -283,10 +187,7 @@
   }
 
   function _resolveConnectWaiters(origin, ok, error) {
-    if (ok) {
-      _targetReady.add(origin);
-      _rememberKnownTarget(origin);
-    }
+    if (ok) _targetReady.add(origin);
     const waiters = _connectWaiters.get(origin) || [];
     _connectWaiters.delete(origin);
     waiters.forEach(function (w) {
@@ -304,34 +205,23 @@
       if (!origin) { reject(new Error('Invalid target environment URL.')); return; }
       const existing = _targetWindows.get(origin);
       if (_targetReady.has(origin) && existing && !existing.closed) { resolve(); return; }
-
-      // Fast path: the target tab may still be open from an earlier session
-      // that THIS tab's own reload (or a background-tab discard) forgot
-      // about — try to silently reattach before ever opening a new tab.
-      _tryReattach(origin).then(function (reattached) {
-        if (reattached) { resolve(); return; }
-        _openAndWaitForConnect(origin, resolve, reject);
-      });
+      const winName = 'efppt_target_' + origin.replace(/[^a-z0-9]/gi, '_');
+      let win;
+      try { win = window.open(origin, winName); }
+      catch (err) { reject(new Error('Could not open a tab for the target environment: ' + err.message)); return; }
+      if (!win) { reject(new Error('The browser blocked the new tab. Allow pop-ups for this site and try again.')); return; }
+      _targetWindows.set(origin, win);
+      const waiters = _connectWaiters.get(origin) || [];
+      waiters.push({ resolve: resolve, reject: reject });
+      _connectWaiters.set(origin, waiters);
+      // Give the user time to switch tabs and click the EF PPT bookmark there.
+      setTimeout(function () {
+        if (!_targetReady.has(origin)) {
+          _resolveConnectWaiters(origin, false,
+            'Timed out waiting for the target tab. Click the EF PPT bookmark in the new tab, then try again.');
+        }
+      }, 120000);
     });
-  }
-
-  function _openAndWaitForConnect(origin, resolve, reject) {
-    const winName = _winNameFor(origin);
-    let win;
-    try { win = window.open(origin, winName); }
-    catch (err) { reject(new Error('Could not open a tab for the target environment: ' + err.message)); return; }
-    if (!win) { reject(new Error('The browser blocked the new tab. Allow pop-ups for this site and try again.')); return; }
-    _targetWindows.set(origin, win);
-    const waiters = _connectWaiters.get(origin) || [];
-    waiters.push({ resolve: resolve, reject: reject });
-    _connectWaiters.set(origin, waiters);
-    // Give the user time to switch tabs and click the EF PPT bookmark there.
-    setTimeout(function () {
-      if (!_targetReady.has(origin)) {
-        _resolveConnectWaiters(origin, false,
-          'Timed out waiting for the target tab. Click the EF PPT bookmark in the new tab, then try again.');
-      }
-    }, 120000);
   }
 
   /** Performs the actual fetch against `url` (this tab's own origin) and normalises the result. */
@@ -419,13 +309,6 @@
     // A target tab we opened has confirmed its own bridge is live.
     if (msg.__efppt === 'launcher-ready' && msg.origin) {
       _resolveConnectWaiters(msg.origin, true, null);
-      return;
-    }
-
-    // Liveness check from a tab trying to silently re-attach to us (see
-    // _tryReattach) — just confirms this launcher.js instance is still here.
-    if (msg.__efppt === 'ping') {
-      if (e.source && e.source.postMessage) e.source.postMessage({ __efppt: 'pong', id: msg.id }, '*');
       return;
     }
 
@@ -1995,10 +1878,5 @@
   // and the user can open Config from the footer link whenever they want.
   ensureRecordDetailsLoaded(parseRecordContext());
   renderFlyout();
-
-  // Silently reattach to any target tabs left over from before this tab's
-  // last reload — if they're still open and alive, cross-env clone/sync just
-  // works immediately, no re-connecting or re-clicking the bookmark needed.
-  _reattachKnownTargets();
 
 })();
