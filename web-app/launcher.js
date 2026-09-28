@@ -453,7 +453,9 @@
       [
         'width:92vw',
         'height:88vh',
-        'max-width:1400px',
+        // Wide screens grow to 80% of the viewport instead of stopping at a
+        // fixed 1400px; below ~1750px wide the 92vw width still applies.
+        'max-width:max(1400px, 80vw)',
         'background:#fff',
         'border-radius:12px',
         'box-shadow:0 20px 60px rgba(0,0,0,.45)',
