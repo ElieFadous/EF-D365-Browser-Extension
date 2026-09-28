@@ -118,7 +118,9 @@
     'env-vars':
       '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5C4.5 3.5 4.5 4.5 4.5 6v1.5C4.5 8.5 3.5 9 3 9c.5 0 1.5.5 1.5 1.5V12c0 1.5 0 2.5 1.5 2.5"/><path d="M12 3.5c1.5 0 1.5 1 1.5 2.5v1.5c0 1 1 1.5 1.5 1.5-.5 0-1.5.5-1.5 1.5V12c0 1.5 0 2.5-1.5 2.5"/><path d="M7.5 9h3"/></svg>',
     'conn-refs':
-      '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 10.5l3-3"/><path d="M8.5 5.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1"/><path d="M9.5 12.5l-1 1A2.5 2.5 0 0 1 5 10l1-1"/></svg>'
+      '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 10.5l3-3"/><path d="M8.5 5.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1"/><path d="M9.5 12.5l-1 1A2.5 2.5 0 0 1 5 10l1-1"/></svg>',
+    'sys-config':
+      '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h7M13 5h2M3 9h2M8 9h7M3 13h9M15 13h0"/><circle cx="11.5" cy="5" r="1.5"/><circle cx="6.5" cy="9" r="1.5"/><circle cx="13.5" cy="13" r="1.5"/></svg>'
   };
 
   const TOOLS = [
@@ -128,7 +130,8 @@
     { name: 'flows',        label: 'Flows'            },
     { name: 'data-sync',    label: 'Data Sync'        },
     { name: 'env-vars',     label: 'Env Variables'    },
-    { name: 'conn-refs',    label: 'Connection Refs'  }
+    { name: 'conn-refs',    label: 'Connection Refs'  },
+    { name: 'sys-config',   label: 'System Config'    }
   ];
 
   const GOTO_TYPES = [
@@ -347,6 +350,60 @@
           if (e.source && e.source.postMessage) e.source.postMessage({ __efppt: 'connect-target-result', id: msg.id, ok: false, error: err.message }, '*');
         }
       );
+      return;
+    }
+
+    // Tool-page services (System Configurator): per-environment settings
+    // storage, target connection status, and running this file's own
+    // cloneRecord on the tool's behalf. Only honoured for our own tool pages
+    // (BASE_URL origin) or this page itself.
+    if (msg.__efppt === 'store-get' || msg.__efppt === 'store-set' ||
+        msg.__efppt === 'target-status' || msg.__efppt === 'clone-record') {
+      if (e.origin !== _originOf(BASE_URL) && e.origin !== window.location.origin) return;
+      const respond = function (payload) {
+        if (e.source && e.source.postMessage) {
+          e.source.postMessage(Object.assign({ __efppt: msg.__efppt + '-result', id: msg.id }, payload), '*');
+        }
+      };
+
+      if (msg.__efppt === 'store-get' || msg.__efppt === 'store-set') {
+        if (typeof msg.key !== 'string' || msg.key.indexOf('ef_ppt_tool_') !== 0) {
+          respond({ ok: false, error: 'Invalid storage key.' });
+          return;
+        }
+        try {
+          if (msg.__efppt === 'store-get') {
+            respond({ ok: true, value: localStorage.getItem(msg.key) });
+          } else {
+            if (msg.value == null) localStorage.removeItem(msg.key);
+            else localStorage.setItem(msg.key, String(msg.value));
+            respond({ ok: true });
+          }
+        } catch (err) {
+          respond({ ok: false, error: 'Browser storage is unavailable here: ' + err.message });
+        }
+        return;
+      }
+
+      if (msg.__efppt === 'target-status') {
+        const o = _originOf(msg.targetOrigin);
+        const w = _targetWindows.get(o);
+        respond({ ok: true, ready: o === window.location.origin || (_targetReady.has(o) && !!w && !w.closed) });
+        return;
+      }
+
+      // clone-record — the exact same engine Record Details' Clone uses.
+      (async function () {
+        try {
+          const src = window.location.origin;
+          const entitySet = await fetchEntitySetName(src, msg.etn);
+          if (!entitySet) throw new Error("Cannot resolve the entity set for '" + msg.etn + "'.");
+          const result = await cloneRecord(src, msg.targetUrl, msg.etn, msg.recordId, entitySet);
+          respond({ ok: true, newId: result.newId });
+        } catch (err) {
+          respond({ ok: false, error: err.message });
+        }
+      })();
       return;
     }
 

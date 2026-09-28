@@ -55,6 +55,40 @@
     });
   }
 
+  /**
+   * Sends a non-fetch request to launcher.js (store-get, store-set,
+   * target-status, connect-target, clone-record) and waits for its
+   * `<type>-result` reply. Rejects when the reply carries ok:false.
+   */
+  function launcherCall(type, payload, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      const id = Math.random().toString(36).slice(2) + Date.now();
+      const timer = setTimeout(function () {
+        window.removeEventListener('message', onMsg);
+        reject(new Error('The launcher did not respond. Re-open this tool from the EF PPT button.'));
+      }, timeoutMs || 10000);
+      function onMsg(e) {
+        const d = e.data;
+        if (!d || d.__efppt !== type + '-result' || d.id !== id) return;
+        clearTimeout(timer);
+        window.removeEventListener('message', onMsg);
+        if (d.ok === false) reject(new Error(d.error || 'Request failed.'));
+        else resolve(d);
+      }
+      window.addEventListener('message', onMsg);
+      // `id` is the correlation id — applied last so a payload can never clobber it.
+      (window.opener || window.parent).postMessage(Object.assign({ __efppt: type }, payload || {}, { id: id }), '*');
+    });
+  }
+
+  /** Per-environment settings storage, held in the D365 org's own localStorage via the launcher. */
+  function storeGet(key) {
+    return launcherCall('store-get', { key: key }, 5000).then(function (r) { return r.value; });
+  }
+  function storeSet(key, value) {
+    return launcherCall('store-set', { key: key, value: value }, 5000);
+  }
+
   /** GETs a collection, following @odata.nextLink until exhausted. */
   async function fetchAll(path) {
     const out = [];
@@ -144,7 +178,9 @@
 
   window.EFD365 = {
     cfg: cfg, envUrl: envUrl, envName: envName, paEnvId: paEnvId, apiBase: apiBase,
+    FORMATTED: FORMATTED,
     request: request, fetchAll: fetchAll, formatted: formatted,
+    launcherCall: launcherCall, storeGet: storeGet, storeSet: storeSet,
     solutionMap: solutionMap, componentSolutions: componentSolutions,
     navProperty: navProperty, solutionUrl: solutionUrl, escHtml: escHtml,
   };

@@ -12,6 +12,9 @@
  *   sortable                 — default true
  *   editable, edit(row, v)   — inline edit; edit() returns a Promise and mutates row
  *   editValue(row), editHint — initial editor text / hint shown under the editor
+ *   editOptions(row)         — [{ value, label }] to edit with a dropdown instead of text
+ *
+ * Options: columns, rowKey, defaultSort, onCountChange, tableMinWidth (CSS length)
  */
 (function () {
   'use strict';
@@ -39,6 +42,7 @@
     this.filters = {};
     this.search = '';
     this.editing = null; // { id, key, draft, error, saving }
+    this.tableMinWidth = opts.tableMinWidth || null;
     this._build();
   }
 
@@ -77,7 +81,8 @@
     const self = this;
     this.host.classList.add('dg');
     this.host.innerHTML =
-      '<div class="dg-scroll"><table class="dg-table">' +
+      '<div class="dg-scroll"><table class="dg-table"' +
+        (this.tableMinWidth ? ' style="min-width:' + esc(this.tableMinWidth) + '"' : '') + '>' +
         '<colgroup>' + this.cols.map(function (c) {
           return '<col' + (c.width ? ' style="width:' + c.width + '"' : '') + '>';
         }).join('') + '</colgroup>' +
@@ -271,10 +276,18 @@
 
     if (ed && ed.id === id && ed.key === col.key) {
       const lines = ed.draft.split('\n').length;
+      const options = col.editOptions ? col.editOptions(row) : null;
+      const editor = options
+        ? '<select class="dg-editor"' + (ed.saving ? ' disabled' : '') + '>' +
+            options.map(function (o) {
+              return '<option value="' + esc(o.value) + '"' + (String(o.value) === ed.draft ? ' selected' : '') + '>' +
+                esc(o.label) + '</option>';
+            }).join('') + '</select>'
+        : '<textarea class="dg-editor" rows="' + Math.min(8, Math.max(2, lines)) + '"' +
+            (ed.saving ? ' disabled' : '') + ' spellcheck="false">' + esc(ed.draft) + '</textarea>';
       return (
         '<td class="' + cls + ' dg-editing" data-key="' + esc(col.key) + '">' +
-          '<textarea class="dg-editor" rows="' + Math.min(8, Math.max(2, lines)) + '"' +
-            (ed.saving ? ' disabled' : '') + ' spellcheck="false">' + esc(ed.draft) + '</textarea>' +
+          editor +
           (ed.error ? '<div class="dg-error">' + esc(ed.error) + '</div>' : '') +
           (col.editHint ? '<div class="dg-hint">' + esc(col.editHint) + '</div>' : '') +
           '<div class="dg-edit-actions">' +
@@ -318,7 +331,9 @@
 
   DataGrid.prototype._focusEditor = function () {
     const ta = this.tbody.querySelector('.dg-editor');
-    if (ta && !ta.disabled) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    if (!ta || ta.disabled) return;
+    ta.focus();
+    if (ta.tagName === 'TEXTAREA') ta.setSelectionRange(ta.value.length, ta.value.length);
   };
 
   DataGrid.prototype._startEdit = function (id, key) {

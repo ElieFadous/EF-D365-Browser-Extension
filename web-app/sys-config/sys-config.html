@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>System Configurator</title>
+  <link rel="stylesheet" href="../shared/tool-grid.css" />
+  <link rel="stylesheet" href="sys-config.css" />
+</head>
+<body>
+  <div class="app">
+
+    <header class="header">
+      <div class="header-brand">
+        <div class="header-logo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true">
+            <path fill-rule="evenodd" fill="#fff" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+            <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+          </svg>
+        </div>
+        <div class="header-titles">
+          <span class="header-title">System Configurator</span>
+          <span class="header-sub" id="env-url"></span>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="header-env-badge" id="env-name"></span>
+        <button type="button" id="btn-configure" class="header-btn">&#9881; Configure</button>
+      </div>
+    </header>
+
+    <div id="boot-state" class="state-msg state-loading">Loading…</div>
+
+    <!-- ── Viewer ── -->
+    <div id="viewer" class="sc-body hidden">
+      <aside class="sc-side">
+        <div class="sc-side-head">Tables</div>
+        <ul id="table-list" class="sc-list"></ul>
+      </aside>
+      <section class="sc-main">
+        <div class="toolbar">
+          <select id="view-select" class="sc-view-select"></select>
+          <input type="search" id="search" class="search-input" placeholder="Search all columns…" autocomplete="off" />
+          <span id="count" class="count"></span>
+          <span class="toolbar-spacer"></span>
+          <button type="button" id="btn-clear" class="btn">Clear filters</button>
+          <button type="button" id="btn-refresh" class="btn">&#8635; Refresh</button>
+        </div>
+        <div id="viewer-state" class="state-msg hidden"></div>
+        <div id="grid-wrap" class="sc-grid-wrap"></div>
+      </section>
+    </div>
+
+    <div id="empty-view" class="state-msg hidden">
+      <p>No tables are configured for this environment yet.</p>
+      <p class="sc-empty-actions">
+        <button type="button" id="btn-empty-configure" class="btn btn--primary">&#9881; Configure tables</button>
+      </p>
+    </div>
+
+    <!-- ── Settings ── -->
+    <div id="settings-view" class="sc-body hidden">
+      <aside class="sc-side">
+        <div class="sc-side-head">Configured tables</div>
+        <ul id="cfg-table-list" class="sc-list"></ul>
+        <div class="sc-side-foot">
+          <button type="button" id="btn-add-table" class="btn sc-block-btn">+ Add table</button>
+        </div>
+      </aside>
+      <section class="sc-main">
+        <div id="cfg-editor" class="sc-cfg"></div>
+        <div class="sc-cfg-footer">
+          <button type="button" id="btn-io" class="btn">Import / Export</button>
+          <span id="cfg-storage-note" class="count"></span>
+          <span class="toolbar-spacer"></span>
+          <span id="cfg-dirty" class="sc-dirty"></span>
+          <button type="button" id="btn-cfg-cancel" class="btn">Cancel</button>
+          <button type="button" id="btn-cfg-save" class="btn btn--primary">Save</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script src="../shared/d365.js"></script>
+  <script src="../shared/data-grid.js"></script>
+  <script src="sys-config.js"></script>
+</body>
+</html>
