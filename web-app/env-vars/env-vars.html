@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Environment Variables</title>
+  <link rel="stylesheet" href="../shared/tool-grid.css" />
+</head>
+<body>
+  <div class="app">
+
+    <header class="header">
+      <div class="header-brand">
+        <div class="header-logo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true">
+            <path fill-rule="evenodd" fill="#fff" d="M 10,6 L 46,6 L 58,18 L 58,46 L 46,58 L 10,58 Z M 22,17 L 40,17 L 50,27 L 50,37 L 40,47 L 22,47 Z"/>
+            <polygon points="36,21 28,34 33,34 27,47 43,31 37,31" fill="#FFB900"/>
+          </svg>
+        </div>
+        <div class="header-titles">
+          <span class="header-title">Environment Variables</span>
+          <span class="header-sub" id="env-url"></span>
+        </div>
+      </div>
+      <span class="header-env-badge" id="env-name"></span>
+    </header>
+
+    <div class="toolbar">
+      <input type="search" id="search" class="search-input" placeholder="Search all columns…" autocomplete="off" />
+      <span id="count" class="count"></span>
+      <span class="toolbar-spacer"></span>
+      <button type="button" id="btn-clear" class="btn">Clear filters</button>
+      <button type="button" id="btn-refresh" class="btn">&#8635; Refresh</button>
+    </div>
+
+    <div id="state" class="state-msg state-loading">Loading environment variables…</div>
+    <div id="grid" class="grid-host hidden"></div>
+  </div>
+
+  <script src="../shared/d365.js"></script>
+  <script src="../shared/data-grid.js"></script>
+  <script src="env-vars.js"></script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+/* ─── EF Power Platform Tools — shared styles for grid-based tool pages ─── */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --primary:       #1B3A6B;
+  --primary-light: #2855a0;
+  --accent:        #C5943A;
+  --success:       #16a34a;
+  --danger:        #dc2626;
+  --warning:       #b45309;
+  --bg:            #f0f3f8;
+  --card:          #ffffff;
+  --text:          #1a1a2e;
+  --text-muted:    #6b7280;
+  --border:        #dde3ed;
+  --border-light:  #edf1f7;
+  --radius:        8px;
+  --radius-sm:     5px;
+}
+
+html, body {
+  height: 100vh;
+  overflow: hidden;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.hidden { display: none !important; }
+
+.app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* ── Header ─────────────────────────────────────────────────────────────────── */
+
+.header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--primary); color: #fff;
+  padding: 11px 20px; flex-shrink: 0;
+}
+.header-brand  { display: flex; align-items: center; gap: 12px; }
+.header-logo   {
+  width: 34px; height: 34px; border-radius: 6px; background: var(--accent);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.header-titles { display: flex; flex-direction: column; gap: 1px; }
+.header-title  { font-weight: 700; font-size: 15px; line-height: 1.2; }
+.header-sub    { font-size: 11px; opacity: 0.65; font-family: Consolas, monospace; }
+.header-env-badge {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.3px;
+  background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.28);
+  border-radius: 5px; padding: 3px 10px;
+}
+
+/* ── Toolbar ────────────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 16px; background: var(--card);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.search-input {
+  width: 280px; max-width: 100%;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font: inherit; color: var(--text); background: var(--bg); outline: none;
+}
+.search-input:focus { border-color: var(--primary-light); background: #fff; }
+.count { font-size: 12px; color: var(--text-muted); }
+.toolbar-spacer { flex: 1; }
+.btn {
+  padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: #fff; color: var(--text); font: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+.btn:hover { background: var(--bg); }
+
+.notice {
+  display: flex; gap: 8px; align-items: flex-start;
+  margin: 10px 16px 0; padding: 8px 12px;
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-sm);
+  font-size: 12px; line-height: 1.45; color: #1e3a8a; flex-shrink: 0;
+}
+.notice--warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+
+/* ── State messages ─────────────────────────────────────────────────────────── */
+
+.state-msg { padding: 48px 20px; text-align: center; color: var(--text-muted); line-height: 1.5; }
+.state-msg.state-error { color: var(--danger); }
+.state-loading::before {
+  content: ''; display: inline-block; width: 14px; height: 14px; margin-right: 8px;
+  border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%;
+  vertical-align: -2px; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Grid ───────────────────────────────────────────────────────────────────── */
+
+.grid-host { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 12px 16px 16px; }
+
+.dg { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.dg-scroll { flex: 1; min-height: 0; overflow: auto; }
+.dg-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+
+.dg-table thead th {
+  position: sticky; z-index: 2; background: #f7f9fc; text-align: left;
+  border-bottom: 1px solid var(--border); padding: 0;
+}
+.dg-head th { top: 0; height: 34px; }
+.dg-filters th { top: 34px; padding: 6px 8px; border-bottom: 2px solid var(--border); }
+
+.dg-sort, .dg-th-label {
+  display: flex; align-items: center; gap: 6px; width: 100%; height: 34px;
+  padding: 0 10px; background: none; border: none; font: inherit;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--text-muted); text-align: left;
+}
+.dg-sort { cursor: pointer; }
+.dg-sort:hover, .dg-sort.active { color: var(--primary); }
+.dg-arrow { font-size: 9px; }
+
+.dg-f-text, .dg-f-select, .dg-f-mode {
+  width: 100%; min-width: 0; padding: 4px 6px;
+  border: 1px solid var(--border); border-radius: 4px;
+  font: inherit; font-size: 12px; color: var(--text); background: #fff; outline: none;
+}
+.dg-f-text:focus, .dg-f-select:focus, .dg-f-mode:focus { border-color: var(--primary-light); }
+.dg-f-value { display: flex; gap: 4px; }
+.dg-f-value .dg-f-mode { flex: 0 0 92px; }
+
+.dg-table tbody td {
+  padding: 7px 10px; border-bottom: 1px solid var(--border-light);
+  vertical-align: top; overflow: hidden;
+}
+.dg-table tbody tr:hover td { background: #f8fafd; }
+.dg-empty { text-align: center; color: var(--text-muted); padding: 32px 10px !important; }
+
+.dg-cell { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.dg-cell-content { flex: 1; min-width: 0; }
+.dg-text {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden; word-break: break-word; white-space: pre-wrap;
+}
+.dg-blank { color: #b0b8c6; }
+.mono, .mono .dg-text { font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+
+.dg-edit-btn {
+  flex-shrink: 0; border: none; background: none; cursor: pointer;
+  color: var(--text-muted); font-size: 13px; line-height: 1; padding: 2px 4px; border-radius: 3px;
+  opacity: 0.35;
+}
+tr:hover .dg-edit-btn { opacity: 0.8; }
+.dg-edit-btn:hover { opacity: 1; color: var(--primary); background: var(--border-light); }
+
+.dg-editing { background: #fffdf5 !important; }
+.dg-editor {
+  width: 100%; resize: vertical; padding: 6px 8px;
+  border: 1px solid var(--primary-light); border-radius: 4px; outline: none;
+  font-family: Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.45;
+  box-shadow: 0 0 0 3px rgba(40,85,160,0.12);
+}
+.dg-hint  { margin-top: 4px; font-size: 11px; color: var(--text-muted); }
+.dg-error { margin-top: 4px; font-size: 11.5px; color: var(--danger); font-weight: 600; word-break: break-word; }
+.dg-edit-actions { display: flex; gap: 6px; margin-top: 6px; }
+.dg-btn {
+  padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); background: #fff;
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.dg-btn--primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.dg-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ── Cell bits shared by tools ──────────────────────────────────────────────── */
+
+.sub { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; word-break: break-all; }
+.link { color: var(--primary-light); text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.more {
+  display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 8px;
+  background: var(--border-light); color: var(--text-muted); font-size: 10.5px; font-weight: 600; cursor: help;
+}
+.pill {
+  display: inline-block; padding: 1px 7px; border-radius: 10px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  background: var(--border-light); color: var(--text-muted);
+}
+.pill--ok   { background: #dcfce7; color: #166534; }
+.pill--warn { background: #fef3c7; color: #92400e; }
+.pill--bad  { background: #fee2e2; color: #991b1b; }
+.actions { display: flex; flex-direction: column; gap: 3px; }
+.actions .disabled { color: #b0b8c6; cursor: not-allowed; }
+.actions a, .actions span { white-space: nowrap; }

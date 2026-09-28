@@ -114,7 +114,11 @@
     flows:
       '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="4.5" r="2"/><circle cx="13.5" cy="9" r="2"/><circle cx="4.5" cy="13.5" r="2"/><path d="M6.2 5.5L12 8M6.2 12.5L12 10"/></svg>',
     'data-sync':
-      '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a6 6 0 0 1 10-2.5L15 6"/><path d="M15 11a6 6 0 0 1-10 2.5L3 12"/><path d="M15 3v3h-3M3 15v-3h3"/></svg>'
+      '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a6 6 0 0 1 10-2.5L15 6"/><path d="M15 11a6 6 0 0 1-10 2.5L3 12"/><path d="M15 3v3h-3M3 15v-3h3"/></svg>',
+    'env-vars':
+      '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5C4.5 3.5 4.5 4.5 4.5 6v1.5C4.5 8.5 3.5 9 3 9c.5 0 1.5.5 1.5 1.5V12c0 1.5 0 2.5 1.5 2.5"/><path d="M12 3.5c1.5 0 1.5 1 1.5 2.5v1.5c0 1 1 1.5 1.5 1.5-.5 0-1.5.5-1.5 1.5V12c0 1.5 0 2.5-1.5 2.5"/><path d="M7.5 9h3"/></svg>',
+    'conn-refs':
+      '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 10.5l3-3"/><path d="M8.5 5.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1"/><path d="M9.5 12.5l-1 1A2.5 2.5 0 0 1 5 10l1-1"/></svg>'
   };
 
   const TOOLS = [
@@ -122,7 +126,9 @@
     { name: 'ribbon',       label: 'Ribbon Buttons'   },
     { name: 'plugin-trace', label: 'Plugin Trace'     },
     { name: 'flows',        label: 'Flows'            },
-    { name: 'data-sync',    label: 'Data Sync'        }
+    { name: 'data-sync',    label: 'Data Sync'        },
+    { name: 'env-vars',     label: 'Env Variables'    },
+    { name: 'conn-refs',    label: 'Connection Refs'  }
   ];
 
   const GOTO_TYPES = [
