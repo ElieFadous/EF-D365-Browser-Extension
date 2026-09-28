@@ -127,6 +127,49 @@
   width: 100%; max-width: 480px; max-height: 86vh; display: flex; flex-direction: column; overflow: hidden;
 }
 .sc-dialog--wide { max-width: 720px; }
+.sc-dialog--xl { max-width: 1000px; height: 82vh; }
+
+.count--error { color: var(--danger); font-weight: 600; }
+
+/* ── JSON columns ── */
+.sc-json-cell { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.sc-json-cell .dg-text { flex: 1; min-width: 0; -webkit-line-clamp: 2; color: var(--text-muted); }
+.sc-json-btn {
+  flex-shrink: 0; padding: 1px 6px; border-radius: 4px; cursor: pointer;
+  border: 1px solid #c7d2fe; background: #eef2ff; color: var(--primary);
+  font-family: Consolas, monospace; font-size: 11px; font-weight: 700; line-height: 1.5;
+}
+.sc-json-btn:hover { background: #e0e7ff; border-color: var(--primary-light); }
+
+.sc-json-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.sc-json {
+  flex: 1; min-height: 0; overflow: auto; margin: 0;
+  background: #0f172a; color: #e2e8f0; border-radius: var(--radius-sm);
+  padding: 10px 0; font-family: Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.55;
+}
+.sc-json--raw { padding: 10px 14px; white-space: pre-wrap; word-break: break-word; }
+.j-line { display: flex; white-space: pre; }
+.j-ln {
+  flex: 0 0 44px; padding-right: 12px; text-align: right; color: #475569;
+  user-select: none; border-right: 1px solid #1e293b; margin-right: 12px;
+}
+.j-code { flex: 1; padding-right: 14px; }
+.j-key  { color: #7dd3fc; }
+.j-str  { color: #86efac; }
+.j-num  { color: #fbbf24; }
+.j-bool { color: #f472b6; }
+.j-null { color: #94a3b8; font-style: italic; }
+.sc-json-empty { padding: 30px; text-align: center; color: var(--text-muted); }
+.sc-json-editor {
+  flex: 1; min-height: 0; width: 100%; resize: none; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none;
+  font-family: Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.55; tab-size: 2;
+}
+.sc-json-editor:focus { border-color: var(--primary-light); box-shadow: 0 0 0 3px rgba(40,85,160,0.12); }
+.sc-json-valid { font-size: 12px; color: var(--text-muted); font-weight: 600; min-height: 16px; }
+.sc-json-valid.ok  { color: var(--success); }
+.sc-json-valid.err { color: var(--danger); word-break: break-word; }
+.sc-dialog-actions .toolbar-spacer { flex: 1; }
 .sc-dialog-title { padding: 14px 18px 10px; font-size: 15px; font-weight: 700; color: var(--primary); border-bottom: 1px solid var(--border-light); }
 .sc-dialog-body { padding: 14px 18px; overflow-y: auto; line-height: 1.5; }
 .sc-dialog-body p + p { margin-top: 8px; }

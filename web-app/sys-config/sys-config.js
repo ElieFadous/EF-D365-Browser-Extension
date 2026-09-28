@@ -44,6 +44,10 @@
   let grid = null;
   let currentSelect = '';
   let loadToken = 0;
+  let tableCtx = null;          // { meta, table, cols } for the grid on screen
+  let query = { search: '', filters: {}, sort: null };
+  let queryTimer = null;
+  const PAGE_SIZE = 250;
 
   // Settings-editor state
   let draft = null;
@@ -110,7 +114,7 @@
           logicalName: t.logicalName,
           columns: (Array.isArray(t.columns) ? t.columns : [])
             .filter(function (c) { return c && typeof c.name === 'string' && c.name; })
-            .map(function (c) { return { name: c.name, editable: !!c.editable }; }),
+            .map(function (c) { return { name: c.name, editable: !!c.editable, json: !!c.json }; }),
           sort: t.sort && t.sort.column ? { column: t.sort.column, dir: t.sort.dir === 'desc' ? 'desc' : 'asc' } : null,
         };
       });
@@ -168,14 +172,19 @@
       D.request(base + '/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet').catch(none),
       D.request(base + '/Attributes/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet').catch(none),
       D.request(base + '/Attributes/Microsoft.Dynamics.CRM.StateAttributeMetadata?$select=LogicalName&$expand=OptionSet').catch(none),
+      D.request(base + '/Attributes/Microsoft.Dynamics.CRM.StatusAttributeMetadata?$select=LogicalName&$expand=OptionSet').catch(none),
     ]);
     const def = results[0];
 
+    // Choice labels for Picklist, State and Status columns — used by the edit
+    // dropdowns and to translate filters/searches into server-side values.
     const options = {};
-    (results[2].value || []).forEach(function (p) {
-      const os = p.OptionSet || p.GlobalOptionSet;
-      options[p.LogicalName] = ((os && os.Options) || []).map(function (o) {
-        return { value: String(o.Value), label: label(o.Label) || String(o.Value) };
+    [results[2], results[4], results[5]].forEach(function (res) {
+      (res.value || []).forEach(function (p) {
+        const os = p.OptionSet || p.GlobalOptionSet;
+        options[p.LogicalName] = ((os && os.Options) || []).map(function (o) {
+          return { value: String(o.Value), label: label(o.Label) || String(o.Value) };
+        });
       });
     });
     const booleans = {};
@@ -298,11 +307,54 @@
   async function selectTable(logicalName) {
     activeTable = logicalName;
     activeView = 'active';
+    tableCtx = null;
     document.getElementById('search').value = '';
     document.querySelectorAll('#table-list li').forEach(function (li) {
       li.classList.toggle('active', li.dataset.table === logicalName);
     });
-    await loadTable();
+
+    const token = ++loadToken;
+    const table = tableConfig(logicalName);
+    if (!table) return;
+    viewerState('Loading…', 'loading');
+    setCount('');
+
+    let meta;
+    try {
+      meta = await loadMeta(table.logicalName);
+    } catch (err) {
+      if (token === loadToken) viewerState('Could not load table “' + table.logicalName + '”: ' + err.message, 'error');
+      return;
+    }
+    if (token !== loadToken) return;
+
+    const viewSel = document.getElementById('view-select');
+    viewSel.innerHTML =
+      '<option value="active">Active ' + esc(meta.plural) + '</option>' +
+      (meta.hasState ? '<option value="inactive">Inactive ' + esc(meta.plural) + '</option>' : '');
+    viewSel.value = 'active';
+    viewSel.disabled = !meta.hasState;
+
+    const cols = table.columns
+      .map(function (c) { return { cfg: c, attr: meta.attrByName.get(c.name) }; })
+      .filter(function (x) { return x.attr; });
+    if (!cols.length) {
+      viewerState('No columns are configured for this table. Use Configure to choose some.', 'info');
+      return;
+    }
+
+    const select = new Set([meta.primaryId]);
+    if (meta.primaryName) select.add(meta.primaryName);
+    cols.forEach(function (x) { select.add(selectName(x.attr)); });
+    currentSelect = Array.from(select).join(',');
+
+    tableCtx = { meta: meta, table: table, cols: cols };
+    buildGrid(meta, table, cols);
+    await fetchPage(true);
+  }
+
+  function loadTable() {
+    return fetchPage(false);
   }
 
   function viewerState(msg, kind) {
@@ -312,6 +364,12 @@
     el.textContent = msg;
     el.className = 'state-msg' + (kind ? ' state-' + kind : '');
     wrap.classList.add('hidden');
+  }
+
+  function setCount(text, isError) {
+    const el = document.getElementById('count');
+    el.textContent = text;
+    el.className = 'count' + (isError ? ' count--error' : '');
   }
 
   function selectName(a) {
@@ -330,61 +388,149 @@
     return settings.tables.filter(function (t) { return t.logicalName === ln; })[0];
   }
 
-  async function loadTable() {
-    const token = ++loadToken;
-    const table = tableConfig(activeTable);
-    if (!table) return;
-    viewerState('Loading…', 'loading');
-    document.getElementById('count').textContent = '';
+  // ── Server-side query ───────────────────────────────────────────────────
+  // Only PAGE_SIZE rows are ever loaded, so search, column filters and sorting
+  // all run in D365 ($filter / $orderby) — filtering the loaded rows would
+  // silently miss everything past the first page.
 
-    let meta;
-    try {
-      meta = await loadMeta(table.logicalName);
-    } catch (err) {
-      if (token === loadToken) viewerState('Could not load table “' + table.logicalName + '”: ' + err.message, 'error');
-      return;
+  function odataString(s) {
+    return "'" + String(s).replace(/'/g, "''") + "'";
+  }
+
+  function isJsonCol(x) {
+    return x.cfg.json && (x.attr.type === 'String' || x.attr.type === 'Memo');
+  }
+
+  function choiceOptions(meta, a) {
+    if (a.type === 'Boolean') {
+      const b = meta.booleans[a.name] || { t: 'Yes', f: 'No' };
+      return [{ value: 'true', label: b.t }, { value: 'false', label: b.f }];
     }
-    if (token !== loadToken) return;
+    return meta.options[a.name] || [];
+  }
 
-    const viewSel = document.getElementById('view-select');
-    viewSel.innerHTML =
-      '<option value="active">Active ' + esc(meta.plural) + '</option>' +
-      (meta.hasState ? '<option value="inactive">Inactive ' + esc(meta.plural) + '</option>' : '');
-    viewSel.value = meta.hasState ? activeView : 'active';
-    viewSel.disabled = !meta.hasState;
-
-    const cols = table.columns
-      .map(function (c) { return { cfg: c, attr: meta.attrByName.get(c.name) }; })
-      .filter(function (x) { return x.attr; });
-    if (!cols.length) {
-      viewerState('No columns are configured for this table. Use Configure to choose some.', 'info');
-      return;
+  /** OData condition matching `q` in one column, or null if this column can't match that text. */
+  function termFor(meta, a, q) {
+    const k = selectName(a);
+    const ql = q.toLowerCase();
+    switch (a.type) {
+      case 'String':
+      case 'Memo':
+        return 'contains(' + a.name + ',' + odataString(q) + ')';
+      case 'Integer':
+      case 'BigInt':
+        return /^-?\d+$/.test(q) ? k + ' eq ' + q : null;
+      case 'Decimal':
+      case 'Double':
+      case 'Money':
+        return q !== '' && isFinite(Number(q)) ? k + ' eq ' + Number(q) : null;
+      case 'Boolean':
+      case 'Picklist':
+      case 'State':
+      case 'Status': {
+        const hits = choiceOptions(meta, a).filter(function (o) { return o.label.toLowerCase().indexOf(ql) !== -1; });
+        if (!hits.length) return null;
+        return hits.map(function (o) { return k + ' eq ' + o.value; }).join(' or ');
+      }
+      case 'Uniqueidentifier':
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q) ? k + ' eq ' + q : null;
+      case 'DateTime':
+        return /^\d{4}-\d{2}-\d{2}$/.test(q)
+          ? 'Microsoft.Dynamics.CRM.On(PropertyName=' + odataString(a.name) + ',PropertyValue=' + odataString(q) + ')'
+          : null;
+      default:
+        return null;
     }
+  }
 
-    const select = new Set([meta.primaryId]);
-    if (meta.primaryName) select.add(meta.primaryName);
-    cols.forEach(function (x) { select.add(selectName(x.attr)); });
-    currentSelect = Array.from(select).join(',');
-
-    let query = '/' + meta.entitySet + '?$select=' + currentSelect;
-    if (meta.hasState) query += '&$filter=statecode eq ' + (activeView === 'inactive' ? 1 : 0);
-
-    let records;
-    try {
-      records = await D.fetchAll(query);
-    } catch (err) {
-      if (token === loadToken) viewerState('Failed to load records: ' + err.message, 'error');
-      return;
+  function filterClause(meta, a, f, noMatch) {
+    const k = selectName(a);
+    if (CHOICE_TYPES.has(a.type)) {
+      if (!f.value) return null;
+      return f.value === '__blank__' ? k + ' eq null' : k + ' eq ' + f.value;
     }
-    if (token !== loadToken) return;
+    const parts = [];
+    if (f.mode === 'blank') parts.push(k + ' eq null');
+    else if (f.mode === 'notblank') parts.push(k + ' ne null');
+    const text = (f.text || '').trim();
+    if (text) parts.push(termFor(meta, a, text) || noMatch);
+    return parts.length ? parts.join(' and ') : null;
+  }
 
-    const rows = records.map(function (rec) {
-      return { id: rec[meta.primaryId], name: (meta.primaryName && rec[meta.primaryName]) || rec[meta.primaryId], rec: rec };
+  function buildQueryUrl() {
+    const meta = tableCtx.meta, cols = tableCtx.cols;
+    const noMatch = meta.primaryId + ' eq null'; // matches nothing — for text no column can contain
+    const clauses = [];
+    if (meta.hasState) clauses.push('statecode eq ' + (activeView === 'inactive' ? 1 : 0));
+
+    const search = (query.search || '').trim();
+    if (search) {
+      const terms = cols.map(function (x) { return termFor(meta, x.attr, search); }).filter(Boolean);
+      clauses.push(terms.length ? terms.map(function (t) { return '(' + t + ')'; }).join(' or ') : noMatch);
+    }
+    cols.forEach(function (x) {
+      const f = query.filters['c_' + x.attr.name];
+      const c = f && filterClause(meta, x.attr, f, noMatch);
+      if (c) clauses.push(c);
     });
 
-    buildGrid(meta, table, cols);
+    let url = '/' + meta.entitySet + '?$select=' + currentSelect + '&$count=true';
+    if (clauses.length) url += '&$filter=' + encodeURIComponent(clauses.map(function (c) { return '(' + c + ')'; }).join(' and '));
+
+    const sortX = query.sort && cols.filter(function (x) { return 'c_' + x.attr.name === query.sort.key; })[0];
+    const order = [];
+    if (sortX) order.push(selectName(sortX.attr) + ' ' + (query.sort.dir === 'desc' ? 'desc' : 'asc'));
+    if (!sortX || sortX.attr.name !== meta.primaryId) order.push(meta.primaryId + ' asc'); // stable order
+    url += '&$orderby=' + encodeURIComponent(order.join(','));
+    return url;
+  }
+
+  async function fetchPage(initial) {
+    if (!tableCtx) return;
+    const token = ++loadToken;
+    const meta = tableCtx.meta;
+    if (initial) viewerState('Loading…', 'loading');
+    else setCount('Loading…');
+
+    let d;
+    try {
+      d = await D.request(buildQueryUrl(), {
+        headers: { Prefer: 'odata.include-annotations="*",odata.maxpagesize=' + PAGE_SIZE },
+      });
+    } catch (err) {
+      if (token !== loadToken) return;
+      if (initial) viewerState('Failed to load records: ' + err.message, 'error');
+      else setCount('Search failed: ' + err.message, true);
+      return;
+    }
+    if (token !== loadToken) return;
+
+    const rows = (d.value || []).slice(0, PAGE_SIZE).map(function (rec) {
+      return { id: rec[meta.primaryId], name: (meta.primaryName && rec[meta.primaryName]) || rec[meta.primaryId], rec: rec };
+    });
     viewerState(null);
     grid.setRows(rows);
+    updateCount(rows.length, d['@odata.count'], d['@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded'] === true);
+  }
+
+  function updateCount(shown, total, exceeded) {
+    const kind = activeView === 'inactive' ? 'inactive' : 'active';
+    const hasTotal = typeof total === 'number';
+    const n = hasTotal ? total : shown;
+    const noun = kind + ' ' + (n === 1 && !exceeded ? 'record' : 'records');
+    if (!exceeded && (!hasTotal || shown >= total)) {
+      setCount(n.toLocaleString() + ' ' + noun);
+      return;
+    }
+    const totalText = exceeded ? '5,000+' : total.toLocaleString();
+    setCount('Showing ' + shown.toLocaleString() + ' of ' + totalText + ' ' + noun + ' — search or filter to find others');
+  }
+
+  function filterPlaceholder(a) {
+    if (NUMERIC_TYPES.has(a.type)) return '= number';
+    if (a.type === 'DateTime') return 'YYYY-MM-DD';
+    if (a.type === 'Uniqueidentifier') return 'GUID';
+    return 'Contains…';
   }
 
   function buildGrid(meta, table, cols) {
@@ -401,24 +547,24 @@
         key: 'c_' + a.name,
         label: a.label,
         value: function (r) { return cellDisplay(a, r.rec); },
-        sortValue: function (r) {
-          const raw = r.rec[k];
-          if (NUMERIC_TYPES.has(a.type)) return raw == null ? null : Number(raw);
-          if (a.type === 'DateTime') return raw || null;
-          return cellDisplay(a, r.rec);
-        },
+        sortable: a.type !== 'Memo' && a.type !== 'MultiSelectPicklist',
         filter: CHOICE_TYPES.has(a.type) ? 'select' : 'value',
+        filterOptions: CHOICE_TYPES.has(a.type) ? choiceOptions(meta, a) : null,
+        filterNoText: LOOKUP_TYPES.has(a.type) || a.type === 'MultiSelectPicklist',
+        filterPlaceholder: filterPlaceholder(a),
       };
-      if (x.cfg.editable && a.canEdit) {
+      const editable = !!(x.cfg.editable && a.canEdit);
+      if (isJsonCol(x)) {
+        // JSON columns are viewed/edited in the JSON viewer rather than inline.
+        col.render = function (r) { return jsonCellHtml(a, r, editable); };
+      } else if (editable) {
         col.editable = true;
         col.editValue = function (r) { const raw = r.rec[k]; return raw == null ? '' : String(raw); };
-        if (a.type === 'Boolean') {
+        if (a.type === 'Boolean' || a.type === 'Picklist') {
           col.editOptions = function () {
-            const b = meta.booleans[a.name] || { t: 'Yes', f: 'No' };
-            return [{ value: 'true', label: b.t }, { value: 'false', label: b.f }];
+            const opts = choiceOptions(meta, a);
+            return a.type === 'Picklist' ? [{ value: '', label: '(none)' }].concat(opts) : opts;
           };
-        } else if (a.type === 'Picklist') {
-          col.editOptions = function () { return [{ value: '', label: '(none)' }].concat(meta.options[a.name] || []); };
         }
         col.editHint = editHint(a);
         col.edit = function (r, text) { return saveCell(meta, a, r, text); };
@@ -440,11 +586,155 @@
       rowKey: function (r) { return r.id; },
       defaultSort: sortCfg,
       tableMinWidth: (cols.length * 130 + 230) + 'px',
-      onCountChange: function (shown, total) {
-        const noun = (activeView === 'inactive' ? 'inactive ' : 'active ') + 'records';
-        document.getElementById('count').textContent = shown === total ? total + ' ' + noun : shown + ' of ' + total + ' ' + noun;
+      serverMode: true,
+      onQueryChange: function (q) {
+        query = q;
+        clearTimeout(queryTimer);
+        queryTimer = setTimeout(function () { fetchPage(false); }, 350);
       },
     });
+    query = grid.query();
+  }
+
+  // ── JSON columns ───────────────────────────────────────────────────────
+
+  function jsonCellHtml(a, r, editable) {
+    const v = r.rec[a.name];
+    const btn = '<button type="button" class="sc-json-btn" data-sc-json="' + esc(a.name) + '" data-id="' + esc(r.id) + '" title="' +
+      (editable ? 'View / edit JSON' : 'View JSON') + '">{ }</button>';
+    if (v == null || v === '') return editable ? '<div class="sc-json-cell">' + btn + '<span class="dg-blank">—</span></div>' : '<span class="dg-blank">—</span>';
+    const preview = String(v).replace(/\s+/g, ' ').slice(0, 300);
+    return '<div class="sc-json-cell">' + btn + '<span class="dg-text mono" title="Open the JSON viewer to see it formatted">' + esc(preview) + '</span></div>';
+  }
+
+  /** Pretty JSON with syntax colouring. Input is escaped first; quotes are left alone so strings still tokenise. */
+  function highlightJson(text) {
+    const safe = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return safe.replace(/("(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*")(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
+      function (m, str, colon, bool) {
+        if (str) return colon ? '<span class="j-key">' + str + '</span>' + colon : '<span class="j-str">' + str + '</span>';
+        if (bool) return '<span class="j-bool">' + m + '</span>';
+        if (m === 'null') return '<span class="j-null">null</span>';
+        return '<span class="j-num">' + m + '</span>';
+      });
+  }
+
+  function jsonLinesHtml(highlighted) {
+    return highlighted.split('\n').map(function (line, i) {
+      return '<div class="j-line"><span class="j-ln">' + (i + 1) + '</span><span class="j-code">' + (line || ' ') + '</span></div>';
+    }).join('');
+  }
+
+  function openJsonViewer(meta, a, row, editable) {
+    const dlg = showDialog(
+      '<div class="sc-dialog-title">' + esc(a.label) + ' <span class="sc-col-sub">' + esc(row.name) + '</span></div>' +
+      '<div class="sc-dialog-body sc-json-body" id="sc-json-body"></div>' +
+      '<div class="sc-dialog-actions" id="sc-json-actions"></div>',
+      'xl'
+    );
+    const body = dlg.el.querySelector('#sc-json-body');
+    const actions = dlg.el.querySelector('#sc-json-actions');
+
+    function current() { const v = row.rec[a.name]; return v == null ? '' : String(v); }
+
+    function view() {
+      const raw = current();
+      let parsed, ok = true;
+      if (raw.trim()) { try { parsed = JSON.parse(raw); } catch (_) { ok = false; } }
+      if (!raw.trim()) {
+        body.innerHTML = '<div class="sc-json-empty">This column is empty.</div>';
+      } else if (ok) {
+        body.innerHTML = '<pre class="sc-json">' + jsonLinesHtml(highlightJson(JSON.stringify(parsed, null, 2))) + '</pre>';
+      } else {
+        body.innerHTML = '<div class="sc-status sc-status--warn">This value isn’t valid JSON — showing it as plain text.</div>' +
+          '<pre class="sc-json sc-json--raw">' + esc(raw) + '</pre>';
+      }
+      actions.innerHTML =
+        (raw.trim() ? '<button type="button" class="btn" data-j="copy">Copy</button>' : '') +
+        (editable ? '<button type="button" class="btn" data-j="edit">Edit</button>' : '') +
+        '<button type="button" class="btn btn--primary" data-j="close">Close</button>';
+    }
+
+    function edit() {
+      const raw = current();
+      let text = raw;
+      try { if (raw.trim()) text = JSON.stringify(JSON.parse(raw), null, 2); } catch (_) { /* keep raw */ }
+      body.innerHTML =
+        '<textarea class="sc-json-editor" id="sc-json-text" spellcheck="false"></textarea>' +
+        '<div id="sc-json-valid" class="sc-json-valid"></div>';
+      const ta = body.querySelector('#sc-json-text');
+      ta.value = text;
+      actions.innerHTML =
+        '<button type="button" class="btn" data-j="format">Format</button>' +
+        '<span class="toolbar-spacer"></span>' +
+        '<button type="button" class="btn" data-j="cancel">Cancel</button>' +
+        '<button type="button" class="btn btn--primary" data-j="save">Save</button>';
+      ta.addEventListener('input', validate);
+      ta.addEventListener('keydown', function (e) {
+        if (e.key === 'Tab') { // indent instead of leaving the editor
+          e.preventDefault();
+          const s = ta.selectionStart, en = ta.selectionEnd;
+          ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(en);
+          ta.selectionStart = ta.selectionEnd = s + 2;
+          validate();
+        }
+      });
+      validate();
+      ta.focus();
+    }
+
+    function validate() {
+      const ta = body.querySelector('#sc-json-text');
+      const out = body.querySelector('#sc-json-valid');
+      if (!ta || !out) return true;
+      if (!ta.value.trim()) { out.className = 'sc-json-valid'; out.textContent = 'Empty — saving will clear this column.'; return true; }
+      try {
+        JSON.parse(ta.value);
+        out.className = 'sc-json-valid ok';
+        out.textContent = '✓ Valid JSON';
+        return true;
+      } catch (e) {
+        out.className = 'sc-json-valid err';
+        out.textContent = '✕ ' + e.message;
+        return false;
+      }
+    }
+
+    actions.addEventListener('click', async function (e) {
+      const b = e.target.closest('[data-j]');
+      if (!b) return;
+      const act = b.dataset.j;
+      if (act === 'close') dlg.close();
+      else if (act === 'edit') edit();
+      else if (act === 'cancel') view();
+      else if (act === 'copy') {
+        Promise.resolve(navigator.clipboard && navigator.clipboard.writeText(current()))
+          .then(function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1200); })
+          .catch(function () { b.textContent = 'Copy failed'; });
+      } else if (act === 'format') {
+        const ta = body.querySelector('#sc-json-text');
+        try { ta.value = JSON.stringify(JSON.parse(ta.value), null, 2); } catch (_) { /* validate() shows why */ }
+        validate();
+      } else if (act === 'save') {
+        const ta = body.querySelector('#sc-json-text');
+        if (!validate()) return;
+        const out = body.querySelector('#sc-json-valid');
+        b.disabled = true;
+        b.textContent = 'Saving…';
+        try {
+          await saveCell(meta, a, row, ta.value.trim() ? ta.value : '');
+          grid.refresh();
+          view();
+        } catch (err) {
+          out.className = 'sc-json-valid err';
+          out.textContent = 'Save failed: ' + err.message;
+          b.disabled = false;
+          b.textContent = 'Save';
+        }
+      }
+    });
+
+    view();
   }
 
   function editHint(a) {
@@ -525,6 +815,13 @@
   }
 
   async function onRowAction(e) {
+    const jsonBtn = e.target.closest('[data-sc-json]');
+    if (jsonBtn && grid && tableCtx) {
+      const jRow = grid.byId.get(jsonBtn.dataset.id);
+      const x = tableCtx.cols.filter(function (c) { return c.attr.name === jsonBtn.dataset.scJson; })[0];
+      if (jRow && x) openJsonViewer(tableCtx.meta, x.attr, jRow, !!(x.cfg.editable && x.attr.canEdit));
+      return;
+    }
     const btn = e.target.closest('[data-sc-act]');
     if (!btn || !grid) return;
     const row = grid.byId.get(btn.dataset.id);
@@ -688,7 +985,8 @@
   function showDialog(html, wide) {
     const overlay = document.createElement('div');
     overlay.className = 'sc-overlay';
-    overlay.innerHTML = '<div class="sc-dialog' + (wide ? ' sc-dialog--wide' : '') + '" role="dialog" aria-modal="true">' + html + '</div>';
+    const size = wide === 'xl' ? ' sc-dialog--xl' : wide ? ' sc-dialog--wide' : '';
+    overlay.innerHTML = '<div class="sc-dialog' + size + '" role="dialog" aria-modal="true">' + html + '</div>';
     document.body.appendChild(overlay);
     function onKey(e) { if (e.key === 'Escape') close(); }
     function close() { document.removeEventListener('keydown', onKey); overlay.remove(); }
@@ -835,6 +1133,12 @@
                 '<label class="sc-editable' + (canEdit ? '' : ' disabled') + '" title="' + esc(canEdit ? 'Allow editing this column in the grid' : (a ? a.editReason : '')) + '">' +
                   '<input type="checkbox" data-editable' + (canEdit && x.cfg.editable ? ' checked' : '') + (canEdit ? '' : ' disabled') + '> Editable' +
                 '</label>' +
+                (a && (a.type === 'String' || a.type === 'Memo')
+                  ? '<label class="sc-editable" title="Values may contain JSON — show a formatted JSON viewer' +
+                      (canEdit ? ' (and editor, when Editable is ticked)' : '') + '">' +
+                      '<input type="checkbox" data-json' + (x.cfg.json ? ' checked' : '') + '> JSON' +
+                    '</label>'
+                  : '<span class="sc-editable disabled" title="Only text columns can hold JSON"><input type="checkbox" disabled> JSON</span>') +
                 '<button type="button" class="sc-remove" data-remove-col title="Remove column">✕</button>' +
               '</li>'
             );
@@ -898,7 +1202,7 @@
       if (!t) return;
       const add = e.target.closest('[data-add-col]');
       if (add) {
-        t.columns.push({ name: add.dataset.addCol, editable: false });
+        t.columns.push({ name: add.dataset.addCol, editable: false, json: false });
         await renderCfgEditor();
         renderCfgList();
         return;
@@ -929,6 +1233,10 @@
         const li = e.target.closest('li[data-col]');
         const c = t.columns.filter(function (x) { return x.name === li.dataset.col; })[0];
         if (c) c.editable = e.target.checked;
+      } else if (e.target.matches('[data-json]')) {
+        const li = e.target.closest('li[data-col]');
+        const c = t.columns.filter(function (x) { return x.name === li.dataset.col; })[0];
+        if (c) c.json = e.target.checked;
       } else if (e.target.id === 'cfg-sort-col' || e.target.id === 'cfg-sort-dir') {
         const col = document.getElementById('cfg-sort-col').value;
         const dir = document.getElementById('cfg-sort-dir').value;
@@ -1008,7 +1316,7 @@
         const t = { logicalName: ln, columns: [], sort: null };
         try {
           const meta = await loadMeta(ln);
-          if (meta.primaryName && meta.attrByName.has(meta.primaryName)) t.columns.push({ name: meta.primaryName, editable: false });
+          if (meta.primaryName && meta.attrByName.has(meta.primaryName)) t.columns.push({ name: meta.primaryName, editable: false, json: false });
         } catch (_) { /* editor shows the error */ }
         draft.tables.push(t);
       }

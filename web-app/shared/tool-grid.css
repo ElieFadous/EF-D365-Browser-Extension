@@ -107,6 +107,20 @@ html, body {
   border-bottom: 1px solid var(--border); padding: 0;
 }
 .dg-head th { top: 0; height: 34px; }
+
+/* Column resize handle — straddles each header's right edge. */
+.dg-resize {
+  position: absolute; top: 0; right: -4px; width: 8px; height: 100%;
+  cursor: col-resize; z-index: 3;
+}
+.dg-resize::after {
+  content: ''; position: absolute; top: 7px; bottom: 7px; left: 3px; width: 2px;
+  border-radius: 1px; background: transparent; transition: background 0.1s;
+}
+.dg-head th:hover .dg-resize::after { background: var(--border); }
+.dg-resize:hover::after, .dg-resize.active::after { background: var(--primary-light); }
+.dg-head th:last-child .dg-resize { right: 0; }
+body.dg-resizing, body.dg-resizing * { cursor: col-resize !important; user-select: none !important; }
 .dg-filters th { top: 34px; padding: 6px 8px; border-bottom: 2px solid var(--border); }
 
 .dg-sort, .dg-th-label {
@@ -127,6 +141,7 @@ html, body {
 .dg-f-text:focus, .dg-f-select:focus, .dg-f-mode:focus { border-color: var(--primary-light); }
 .dg-f-value { display: flex; gap: 4px; }
 .dg-f-value .dg-f-mode { flex: 0 0 92px; }
+.dg-f-value--mode-only .dg-f-mode { flex: 1 1 auto; }
 
 .dg-table tbody td {
   padding: 7px 10px; border-bottom: 1px solid var(--border-light);
@@ -189,3 +204,44 @@ tr:hover .dg-edit-btn { opacity: 0.8; }
 .actions { display: flex; flex-direction: column; gap: 3px; }
 .actions .disabled { color: #b0b8c6; cursor: not-allowed; }
 .actions a, .actions span { white-space: nowrap; }
+
+/* ── Dropdowns ──────────────────────────────────────────────────────────────
+   Styled pop-up list via customizable <select> (appearance: base-select).
+   Browsers without support keep their native dropdown, so this is purely
+   progressive — no custom widget, keyboard and screen-reader behaviour
+   stay the browser's own. Applies to every <select> on tool pages. */
+@supports (appearance: base-select) {
+  select, ::picker(select) { appearance: base-select; }
+
+  select {
+    display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+    font: inherit; cursor: pointer;
+  }
+  select::picker-icon {
+    content: ''; flex-shrink: 0; width: 6px; height: 6px; margin: 0 2px 3px 0;
+    border-right: 1.5px solid var(--text-muted); border-bottom: 1.5px solid var(--text-muted);
+    transform: rotate(45deg); transition: transform 0.15s, margin 0.15s;
+  }
+  select:open::picker-icon { transform: rotate(225deg); margin: 3px 2px 0 0; }
+  select:disabled { cursor: not-allowed; opacity: 0.6; }
+
+  ::picker(select) {
+    min-width: anchor-size(width);
+    max-height: min(340px, 60vh); overflow-y: auto;
+    margin-block: 4px; padding: 4px;
+    background: #fff; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18), 0 2px 6px rgba(15, 23, 42, 0.08);
+  }
+
+  option {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 10px; border-radius: 5px;
+    font-size: 12.5px; font-weight: 400; color: var(--text); white-space: nowrap;
+    cursor: pointer;
+  }
+  option:hover, option:focus-visible { background: #eef2ff; outline: none; }
+  option:checked { background: #e8eefc; color: var(--primary); font-weight: 600; }
+  option::checkmark { order: 1; margin-left: auto; content: '✓'; font-size: 11px; color: var(--primary); }
+  option:disabled { color: #b0b8c6; cursor: default; background: none; }
+}
