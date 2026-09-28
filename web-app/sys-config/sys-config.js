@@ -7,17 +7,26 @@
  * one's records in a grid with search, per-column filters, sorting, inline
  * edits and row actions (open, clone, deactivate/activate).
  *
- * Settings are stored per environment in the D365 org's own localStorage
- * via the launcher (tool pages' own storage is partitioned when embedded).
- * `settings.systemConfigurator` in the web-app config seeds any environment
- * that has nothing saved yet; Import / Export copies settings between envs.
+ * Settings are shared by every environment by default; individual
+ * environments can opt out and keep their own. The shared copy lives in this
+ * tool page's own localStorage (embedded under *.dynamics.com that is one
+ * storage partition for all orgs, since dynamics.com isn't a public suffix)
+ * and is mirrored into each visited org's localStorage via the launcher, so a
+ * popped-out tab — a different partition — still converges on the newest copy.
+ * An opted-out environment's own settings live only in that org's storage.
+ * `settings.systemConfigurator` in the web-app config seeds the shared copy
+ * when nothing has been saved yet.
  */
 (function () {
   'use strict';
 
   const D = window.EFD365;
   const esc = D.escHtml;
-  const STORE_KEY = 'ef_ppt_tool_sysconfig';
+  const ENV_KEY    = 'ef_ppt_tool_sysconfig';          // org store: this env's own settings (opted-out envs)
+  const MIRROR_KEY = 'ef_ppt_tool_sysconfig_shared';   // org store: mirror of the shared record
+  const MIGRATED_KEY = 'ef_ppt_tool_sysconfig_migrated';
+  const LOCAL_KEY  = 'ef_ppt_sysconfig_shared';        // tool page's own localStorage
+  const THIS_ENV   = envKey(D.envUrl);
 
   const SYSTEM_ATTRS = new Set([
     'createdon', 'createdby', 'createdonbehalfby', 'modifiedon', 'modifiedby', 'modifiedonbehalfby',
@@ -32,8 +41,11 @@
   const SKIP_TYPES     = new Set(['EntityName', 'ManagedProperty', 'CalendarRules', 'PartyList']);
   const CHOICE_TYPES   = new Set(['Picklist', 'Boolean', 'State', 'Status']);
 
-  let settings = { version: 1, tables: [] };
-  let settingsSource = 'none'; // 'org' | 'config' | 'none'
+  let settings = { version: 1, tables: [] };   // what this environment uses
+  let shared = null;          // { updatedAt, settings, excluded: [envKey] } — null until anything is saved/seeded
+  let sharedSeeded = false;   // shared came from the web-app config, not a save
+  let envOwn = null;          // this environment's own settings, if it has any
+  let localOk = true;         // tool-page localStorage usable (false when the browser blocks it here)
 
   const metaCache = new Map();  // logicalName -> Promise<meta>
   let entityListPromise = null;
@@ -122,28 +134,131 @@
     return { version: 1, tables: tables };
   }
 
+  /** Environments are identified by lower-cased origin. */
+  function envKey(url) {
+    return String(url || '').trim().replace(/\/+$/, '').toLowerCase();
+  }
+
+  function parseJson(raw) {
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (_) { return null; }
+  }
+
+  function normalizeShared(s) {
+    if (!s || typeof s !== 'object' || !s.settings) return null;
+    return {
+      updatedAt: Number(s.updatedAt) || 0,
+      settings: normalizeSettings(s.settings),
+      excluded: (Array.isArray(s.excluded) ? s.excluded : []).map(envKey).filter(Boolean)
+        .filter(function (k, i, a) { return a.indexOf(k) === i; }),
+    };
+  }
+
+  function readLocalShared() {
+    try { return normalizeShared(parseJson(localStorage.getItem(LOCAL_KEY))); }
+    catch (_) { localOk = false; return null; }
+  }
+
+  function isOptedOut() {
+    return !!shared && shared.excluded.indexOf(THIS_ENV) !== -1;
+  }
+
+  /** Writes the shared record to this page's storage and this org's mirror. */
+  async function persistShared() {
+    const json = JSON.stringify(shared);
+    try { localStorage.setItem(LOCAL_KEY, json); localOk = true; }
+    catch (_) { localOk = false; }
+    try { await D.storeSet(MIRROR_KEY, json); }
+    catch (err) { if (!localOk) throw err; } // only fatal when neither copy could be written
+    sharedSeeded = false;
+  }
+
+  function resolveSettings() {
+    if (isOptedOut()) settings = envOwn || (shared ? clone(shared.settings) : { version: 1, tables: [] });
+    else settings = shared ? shared.settings : { version: 1, tables: [] };
+  }
+
   async function loadSettings() {
-    try {
-      const raw = await D.storeGet(STORE_KEY);
-      if (raw) {
-        settings = normalizeSettings(JSON.parse(raw));
-        settingsSource = 'org';
-        return;
+    const get = function (k) {
+      return D.storeGet(k).catch(function (err) {
+        console.warn('[EF PPT] Could not read ' + k + ':', err);
+        return null;
+      });
+    };
+    const org = await Promise.all([get(ENV_KEY), get(MIRROR_KEY), get(MIGRATED_KEY)]);
+    const ownRaw = parseJson(org[0]);
+    envOwn = ownRaw && Array.isArray(ownRaw.tables) ? normalizeSettings(ownRaw) : null;
+
+    // Newest of the two shared copies wins; bring the stale one up to date.
+    const local = readLocalShared();
+    const mirror = normalizeShared(parseJson(org[1]));
+    shared = local && (!mirror || local.updatedAt >= mirror.updatedAt) ? local : mirror;
+    let dirty = !!shared && (!local || !mirror || local.updatedAt !== mirror.updatedAt);
+
+    // One-time move from per-environment settings: the first environment with
+    // settings seeds the shared copy; one whose settings differ from the shared
+    // copy is opted out so nothing is lost (it can be opted back in).
+    if (!org[2] && envOwn) {
+      if (!shared) {
+        shared = { updatedAt: Date.now(), settings: envOwn, excluded: [] };
+        dirty = true;
+      } else if (!isOptedOut() && JSON.stringify(envOwn) !== JSON.stringify(shared.settings)) {
+        shared.excluded.push(THIS_ENV);
+        shared.updatedAt = Date.now();
+        dirty = true;
       }
-    } catch (err) {
-      console.warn('[EF PPT] Could not read System Configurator settings:', err);
+      D.storeSet(MIGRATED_KEY, '1').catch(function () {});
     }
-    const seed = D.cfg.settings && D.cfg.settings.systemConfigurator;
-    if (seed) {
-      settings = normalizeSettings(seed);
-      settingsSource = 'config';
+
+    if (dirty) {
+      await persistShared().catch(function (err) { console.warn('[EF PPT] Could not sync shared settings:', err); });
+    } else if (!shared) {
+      const seed = D.cfg.settings && D.cfg.settings.systemConfigurator;
+      if (seed) {
+        shared = { updatedAt: 0, settings: normalizeSettings(seed), excluded: [] };
+        sharedSeeded = true;
+      }
     }
+    // Opted out from another environment: this org couldn't be written then,
+    // so take its own copy of the shared settings now, on first visit.
+    if (isOptedOut() && !envOwn) {
+      envOwn = clone(shared.settings);
+      D.storeSet(ENV_KEY, JSON.stringify(envOwn)).catch(function () {});
+    }
+    resolveSettings();
   }
 
   async function saveSettings(next) {
-    await D.storeSet(STORE_KEY, JSON.stringify(next));
-    settings = next;
-    settingsSource = 'org';
+    if (isOptedOut()) {
+      await D.storeSet(ENV_KEY, JSON.stringify(next));
+      envOwn = next;
+    } else {
+      const prev = shared;
+      shared = { updatedAt: Date.now(), settings: next, excluded: prev ? prev.excluded.slice() : [] };
+      try { await persistShared(); }
+      catch (err) { shared = prev; throw err; }
+    }
+    resolveSettings();
+  }
+
+  /** Replaces the opted-out list; when this environment switches side, starts it from the other side's settings. */
+  async function saveExcluded(excluded) {
+    const wasOut = isOptedOut();
+    const prev = shared;
+    shared = {
+      updatedAt: Date.now(),
+      settings: prev ? prev.settings : clone(settings),
+      excluded: excluded,
+    };
+    const nowOut = isOptedOut();
+    if (nowOut && !wasOut && !envOwn) {
+      // Opting out: this environment starts from a copy of the shared settings.
+      envOwn = clone(shared.settings);
+      await D.storeSet(ENV_KEY, JSON.stringify(envOwn));
+    }
+    try { await persistShared(); }
+    catch (err) { shared = prev; throw err; }
+    resolveSettings();
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -1170,11 +1285,97 @@
     document.getElementById('empty-view').classList.add('hidden');
     document.getElementById('settings-view').classList.remove('hidden');
     document.getElementById('btn-configure').innerHTML = '&#8592; Back to tables';
-    document.getElementById('cfg-storage-note').textContent =
-      (settingsSource === 'config' ? 'Currently using the defaults from your web-app config. ' : '') +
-      'Saved in this browser for ' + D.envName + '.';
+    renderScope();
     renderCfgList();
     renderCfgEditor();
+  }
+
+  function configuredEnvs() {
+    const list = (Array.isArray(D.cfg.environments) ? D.cfg.environments : [])
+      .filter(function (e) { return e && e.url; })
+      .map(function (e) { return { key: envKey(e.url), name: e.name || e.url, url: e.url }; });
+    if (!list.some(function (e) { return e.key === THIS_ENV; })) list.unshift({ key: THIS_ENV, name: D.envName, url: D.envUrl });
+    // Opted-out environments that are no longer in the config still show, so they can be opted back in.
+    (shared ? shared.excluded : []).forEach(function (k) {
+      if (!list.some(function (e) { return e.key === k; })) list.push({ key: k, name: k.replace(/^https?:\/\//, ''), url: k });
+    });
+    return list;
+  }
+
+  /** Scope banner above the editor + the footer button. */
+  function renderScope() {
+    const el = document.getElementById('cfg-scope');
+    const out = isOptedOut();
+    const others = shared ? shared.excluded.filter(function (k) { return k !== THIS_ENV; }).length : 0;
+    let html;
+    if (out) {
+      html = '<strong>' + esc(D.envName) + ' uses its own settings.</strong> Changes here don’t affect other environments.';
+    } else {
+      html = '<strong>Shared settings</strong> — changes apply to ' +
+        (others ? 'all environments except ' + others + ' that opted out.' : 'all environments.');
+      if (sharedSeeded) html += ' Currently the defaults from your web-app config.';
+    }
+    if (!localOk) {
+      html += '<br>This browser is blocking the tool’s shared storage here, so changes reach other environments only after you open this tool from a D365 page with storage allowed.';
+    }
+    el.className = 'sc-scope' + (out ? ' sc-scope--own' : '');
+    el.innerHTML = '<span class="sc-scope-text">' + html + '</span>' +
+      '<button type="button" class="btn" id="btn-scope">Environments…</button>';
+    el.querySelector('#btn-scope').addEventListener('click', openEnvironments);
+  }
+
+  function openEnvironments() {
+    const envs = configuredEnvs();
+    const excluded = new Set(shared ? shared.excluded : []);
+    const dlg = showDialog(
+      '<div class="sc-dialog-title">Environments</div>' +
+      '<div class="sc-dialog-body">' +
+        '<p>Ticked environments use the shared settings. Untick one to give it its own settings — it starts from a copy of the shared ones, taken the next time this tool opens there.</p>' +
+        '<ul class="sc-env-list">' + envs.map(function (e) {
+          return (
+            '<li><label>' +
+              '<input type="checkbox" data-env="' + esc(e.key) + '"' + (excluded.has(e.key) ? '' : ' checked') + '>' +
+              '<span class="sc-env-name">' + esc(e.name) + (e.key === THIS_ENV ? ' <em>(this environment)</em>' : '') + '</span>' +
+              '<span class="sc-env-url">' + esc(e.url.replace(/^https?:\/\//, '')) + '</span>' +
+            '</label></li>'
+          );
+        }).join('') + '</ul>' +
+        '<div id="sc-env-status" class="sc-status hidden"></div>' +
+      '</div>' +
+      '<div class="sc-dialog-actions">' +
+        '<button type="button" class="btn" data-dlg="close">Cancel</button>' +
+        '<button type="button" class="btn btn--primary" data-dlg="apply">Apply</button>' +
+      '</div>'
+    );
+    const statusEl = dlg.el.querySelector('#sc-env-status');
+    const thisBox = dlg.el.querySelector('[data-env="' + CSS.escape(THIS_ENV) + '"]');
+    const wasOut = excluded.has(THIS_ENV);
+    dlg.el.addEventListener('change', function () {
+      const switching = thisBox && thisBox.checked === wasOut;
+      if (switching && isDirty()) setStatus(statusEl, 'warn', 'This environment is switching settings — your unsaved changes will be discarded.');
+      else statusEl.className = 'sc-status hidden';
+    });
+    dlg.el.querySelector('[data-dlg="close"]').addEventListener('click', dlg.close);
+    dlg.el.querySelector('[data-dlg="apply"]').addEventListener('click', async function () {
+      const btn = this;
+      const next = [...dlg.el.querySelectorAll('[data-env]')].filter(function (cb) { return !cb.checked; }).map(function (cb) { return cb.dataset.env; });
+      btn.disabled = true;
+      try {
+        const switched = next.indexOf(THIS_ENV) !== -1 !== wasOut;
+        await saveExcluded(next);
+        dlg.close();
+        if (switched) {
+          draft = clone(settings);
+          if (!draft.tables.some(function (t) { return t.logicalName === draftSel; })) draftSel = draft.tables[0] ? draft.tables[0].logicalName : null;
+          renderCfgList();
+          renderCfgEditor();
+        }
+        renderScope();
+      } catch (err) {
+        btn.disabled = false;
+        setStatus(statusEl, 'err', 'Couldn’t save: ' + esc(err.message));
+      }
+    });
   }
 
   function isDirty() {
@@ -1268,15 +1469,14 @@
       '<div class="sc-cols">' +
         '<div class="sc-panel">' +
           '<div class="sc-panel-head">Selected columns (' + selectedCols.length + ') <small>top to bottom = left to right in the grid</small></div>' +
-          (selectedCols.length ? '<ol class="sc-selected">' + selectedCols.map(function (x, i) {
+          (selectedCols.length ? '<ol class="sc-selected">' + selectedCols.map(function (x) {
             const a = x.attr;
             const canEdit = a && a.canEdit;
             return (
               '<li data-col="' + esc(x.cfg.name) + '">' +
-                '<div class="sc-move">' +
-                  '<button type="button" data-move="-1" title="Move up"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
-                  '<button type="button" data-move="1" title="Move down"' + (i === selectedCols.length - 1 ? ' disabled' : '') + '>▼</button>' +
-                '</div>' +
+                '<button type="button" class="sc-drag" data-drag title="Drag to reorder (or focus and use ↑ ↓)" aria-label="Reorder">' +
+                  '<svg viewBox="0 0 10 16" aria-hidden="true"><circle cx="3" cy="3" r="1.3"/><circle cx="7" cy="3" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="7" cy="8" r="1.3"/><circle cx="3" cy="13" r="1.3"/><circle cx="7" cy="13" r="1.3"/></svg>' +
+                '</button>' +
                 '<div class="sc-col-text">' +
                   '<div class="sc-col-name">' + esc(a ? a.label : x.cfg.name) + '</div>' +
                   '<div class="sc-col-sub">' + esc(x.cfg.name) + ' · ' + esc(a ? a.type : 'not found in this environment') + '</div>' +
@@ -1362,14 +1562,6 @@
       if (!li) return;
       const idx = t.columns.findIndex(function (c) { return c.name === li.dataset.col; });
       if (idx === -1) return;
-      const move = e.target.closest('[data-move]');
-      if (move && !move.disabled) {
-        const to = idx + parseInt(move.dataset.move, 10);
-        const item = t.columns.splice(idx, 1)[0];
-        t.columns.splice(to, 0, item);
-        await renderCfgEditor();
-        return;
-      }
       if (e.target.closest('[data-remove-col]')) {
         const removed = t.columns.splice(idx, 1)[0];
         if (t.sort && t.sort.column === removed.name) t.sort = null;
@@ -1395,6 +1587,7 @@
       }
       updateDirty();
     });
+    wireColumnDrag(editor);
     editor.addEventListener('input', function (e) {
       if (e.target.id !== 'cfg-col-search') return;
       availableFilter = e.target.value;
@@ -1425,6 +1618,87 @@
       }
     });
     document.getElementById('btn-io').addEventListener('click', openImportExport);
+  }
+
+  /**
+   * Drag-and-drop reordering of the selected-columns list. Only the grip
+   * starts a drag (so checkboxes and text stay clickable); the grip also
+   * takes ↑ / ↓ from the keyboard. Moves the <li> in place and mirrors the
+   * order into the draft, so the list keeps its scroll position.
+   */
+  function wireColumnDrag(editor) {
+    let dragLi = null;
+
+    function syncOrder(ol) {
+      const t = draftTable();
+      if (!t) return;
+      const byName = new Map(t.columns.map(function (c) { return [c.name, c]; }));
+      t.columns = [...ol.children].map(function (li) { return byName.get(li.dataset.col); }).filter(Boolean);
+      updateDirty();
+    }
+    function clearMarks(ol) {
+      if (ol) ol.querySelectorAll('.sc-drop-before, .sc-drop-after').forEach(function (li) { li.classList.remove('sc-drop-before', 'sc-drop-after'); });
+    }
+
+    editor.addEventListener('pointerdown', function (e) {
+      const grip = e.target.closest('[data-drag]');
+      if (grip) grip.closest('li').draggable = true;
+    });
+    editor.addEventListener('pointerup', function (e) {
+      const li = e.target.closest('.sc-selected li');
+      if (li && li !== dragLi) li.draggable = false;
+    });
+    editor.addEventListener('dragstart', function (e) {
+      const li = e.target.closest && e.target.closest('.sc-selected li[draggable="true"]');
+      if (!li) return;
+      dragLi = li;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', li.dataset.col);
+      requestAnimationFrame(function () { li.classList.add('sc-dragging'); });
+    });
+    editor.addEventListener('dragover', function (e) {
+      if (!dragLi) return;
+      const ol = dragLi.parentNode;
+      const li = e.target.closest && e.target.closest('.sc-selected li');
+      if (!li || li.parentNode !== ol) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      clearMarks(ol);
+      if (li === dragLi) return;
+      const r = li.getBoundingClientRect();
+      li.classList.add(e.clientY < r.top + r.height / 2 ? 'sc-drop-before' : 'sc-drop-after');
+    });
+    editor.addEventListener('drop', function (e) {
+      if (!dragLi) return;
+      e.preventDefault();
+      const ol = dragLi.parentNode;
+      const target = ol.querySelector('.sc-drop-before, .sc-drop-after');
+      if (target) {
+        ol.insertBefore(dragLi, target.classList.contains('sc-drop-before') ? target : target.nextSibling);
+        syncOrder(ol);
+      }
+      clearMarks(ol);
+    });
+    editor.addEventListener('dragend', function () {
+      if (!dragLi) return;
+      clearMarks(dragLi.parentNode);
+      dragLi.classList.remove('sc-dragging');
+      dragLi.draggable = false;
+      dragLi = null;
+    });
+    editor.addEventListener('keydown', function (e) {
+      const grip = e.target.closest('[data-drag]');
+      if (!grip || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      e.preventDefault();
+      const li = grip.closest('li');
+      const ol = li.parentNode;
+      if (e.key === 'ArrowUp' && li.previousElementSibling) ol.insertBefore(li, li.previousElementSibling);
+      else if (e.key === 'ArrowDown' && li.nextElementSibling) ol.insertBefore(li.nextElementSibling, li);
+      else return;
+      grip.focus();
+      li.scrollIntoView({ block: 'nearest' });
+      syncOrder(ol);
+    });
   }
 
   function openTablePicker() {
@@ -1487,8 +1761,8 @@
     const dlg = showDialog(
       '<div class="sc-dialog-title">Import / Export settings</div>' +
       '<div class="sc-dialog-body">' +
-        '<p>Copy this JSON to reuse the same configuration in another environment, or paste settings here and apply them. ' +
-          'To make it the default everywhere, add it to your web-app config as <code>settings.systemConfigurator</code>.</p>' +
+        '<p>Settings are already shared across your environments in this browser. Copy this JSON to use them in another browser ' +
+          'or on another machine, or add it to your web-app config as <code>settings.systemConfigurator</code> to make it the default.</p>' +
         '<textarea id="sc-io-text" spellcheck="false"></textarea>' +
         '<div id="sc-io-status" class="sc-status hidden"></div>' +
       '</div>' +
