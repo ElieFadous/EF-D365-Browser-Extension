@@ -459,7 +459,8 @@
     return parts.length ? parts.join(' and ') : null;
   }
 
-  function buildQueryUrl() {
+  /** The encoded $filter for the current view, search and column filters — or '' when unfiltered. */
+  function buildFilter() {
     const meta = tableCtx.meta, cols = tableCtx.cols;
     const noMatch = meta.primaryId + ' eq null'; // matches nothing — for text no column can contain
     const clauses = [];
@@ -476,8 +477,14 @@
       if (c) clauses.push(c);
     });
 
+    return clauses.length ? encodeURIComponent(clauses.map(function (c) { return '(' + c + ')'; }).join(' and ')) : '';
+  }
+
+  function buildQueryUrl() {
+    const meta = tableCtx.meta, cols = tableCtx.cols;
+    const filter = buildFilter();
     let url = '/' + meta.entitySet + '?$select=' + currentSelect + '&$count=true';
-    if (clauses.length) url += '&$filter=' + encodeURIComponent(clauses.map(function (c) { return '(' + c + ')'; }).join(' and '));
+    if (filter) url += '&$filter=' + filter;
 
     const sortX = query.sort && cols.filter(function (x) { return 'c_' + x.attr.name === query.sort.key; })[0];
     const order = [];
@@ -512,20 +519,53 @@
     });
     viewerState(null);
     grid.setRows(rows);
-    updateCount(rows.length, d['@odata.count'], d['@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded'] === true);
+    const total = d['@odata.count'];
+    if (d['@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded'] === true) {
+      updateCount(rows.length, typeof total === 'number' ? total : 5000, 'counting');
+      countAll(token, rows.length);
+    } else {
+      updateCount(rows.length, total);
+    }
   }
 
-  function updateCount(shown, total, exceeded) {
+  /**
+   * $count stops at 5,000, so for bigger views count exactly in the background
+   * by paging through just the primary ids with the same $filter. Abandoned as
+   * soon as the view, search or filters change (loadToken moves on).
+   */
+  async function countAll(token, shown) {
+    const meta = tableCtx.meta;
+    const filter = buildFilter();
+    let url = '/' + meta.entitySet + '?$select=' + meta.primaryId + (filter ? '&$filter=' + filter : '');
+    let n = 0;
+    try {
+      while (url) {
+        const d = await D.request(url, { headers: { Prefer: 'odata.maxpagesize=5000' } });
+        if (token !== loadToken) return;
+        n += (d.value || []).length;
+        url = d['@odata.nextLink'] || null;
+        updateCount(shown, n, url ? 'counting' : null);
+      }
+    } catch (err) {
+      if (token !== loadToken) return;
+      console.warn('[EF PPT] Could not count all records:', err);
+      updateCount(shown, Math.max(n, 5000), 'failed');
+    }
+  }
+
+  /** `state`: undefined = exact, 'counting' = total is a running minimum, 'failed' = counting gave up. */
+  function updateCount(shown, total, state) {
     const kind = activeView === 'inactive' ? 'inactive' : 'active';
     const hasTotal = typeof total === 'number';
     const n = hasTotal ? total : shown;
-    const noun = kind + ' ' + (n === 1 && !exceeded ? 'record' : 'records');
-    if (!exceeded && (!hasTotal || shown >= total)) {
+    const noun = kind + ' ' + (n === 1 && !state ? 'record' : 'records');
+    if (!state && (!hasTotal || shown >= total)) {
       setCount(n.toLocaleString() + ' ' + noun);
       return;
     }
-    const totalText = exceeded ? '5,000+' : total.toLocaleString();
-    setCount('Showing ' + shown.toLocaleString() + ' of ' + totalText + ' ' + noun + ' — search or filter to find others');
+    const totalText = n.toLocaleString() + (state ? '+' : '');
+    const suffix = state === 'counting' ? ' — counting…' : ' — search or filter to find others';
+    setCount('Showing ' + shown.toLocaleString() + ' of ' + totalText + ' ' + noun + suffix);
   }
 
   function filterPlaceholder(a) {
