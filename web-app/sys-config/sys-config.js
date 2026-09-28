@@ -84,6 +84,7 @@
       selectTable(li.dataset.table);
     });
     document.getElementById('grid-wrap').addEventListener('click', onRowAction);
+    document.getElementById('actionbar').addEventListener('click', onBulkAction);
     wireSettings();
 
     if (!D.envUrl) {
@@ -350,6 +351,7 @@
 
     tableCtx = { meta: meta, table: table, cols: cols };
     buildGrid(meta, table, cols);
+    updateActionBar([]);
     await fetchPage(true);
   }
 
@@ -572,11 +574,6 @@
       return col;
     });
 
-    columns.push({
-      key: '_actions', label: 'Actions', width: '230px', sortable: false, searchable: false,
-      render: function (r) { return renderActions(meta, r); },
-    });
-
     const sortCfg = table.sort && cols.some(function (x) { return x.attr.name === table.sort.column; })
       ? { key: 'c_' + table.sort.column, dir: table.sort.dir }
       : { key: 'c_' + cols[0].attr.name, dir: 'asc' };
@@ -585,7 +582,9 @@
       columns: columns,
       rowKey: function (r) { return r.id; },
       defaultSort: sortCfg,
-      tableMinWidth: (cols.length * 130 + 230) + 'px',
+      tableMinWidth: (cols.length * 130 + 40) + 'px',
+      selectable: true,
+      onSelectionChange: updateActionBar,
       serverMode: true,
       onQueryChange: function (q) {
         query = q;
@@ -802,49 +801,116 @@
     return !Array.isArray(wl) || wl.indexOf(meta.logicalName.toLowerCase()) !== -1;
   }
 
-  function renderActions(meta, r) {
-    const id = esc(r.id);
-    let html = '<button type="button" class="sc-act" data-sc-act="open" data-id="' + id + '">Open ↗</button>';
-    if (cloneAllowed(meta)) html += '<button type="button" class="sc-act" data-sc-act="clone" data-id="' + id + '">Clone</button>';
-    if (meta.hasState) {
-      html += activeView === 'inactive'
-        ? '<button type="button" class="sc-act" data-sc-act="activate" data-id="' + id + '">Activate</button>'
-        : '<button type="button" class="sc-act sc-act--danger" data-sc-act="deactivate" data-id="' + id + '">Deactivate</button>';
-    }
-    return '<div class="sc-actions">' + html + '</div>';
+  // ── Action bar — every action works on the selected rows ────────────────
+
+  function updateActionBar(rows) {
+    rows = rows || (grid ? grid.getSelectedRows() : []);
+    const bar = document.getElementById('actionbar');
+    const meta = tableCtx && tableCtx.meta;
+    const n = rows.length;
+    const btn = function (name) { return bar.querySelector('[data-bulk="' + name + '"]'); };
+
+    btn('open').disabled = n === 0;
+
+    const clone = btn('clone');
+    const canClone = !!meta && cloneAllowed(meta);
+    clone.disabled = n === 0 || !canClone;
+    clone.title = meta && !canClone
+      ? 'Cloning this table is turned off by the clone whitelist in your config'
+      : 'Clone the selected records';
+
+    const state = btn('state');
+    const deactivate = activeView !== 'inactive';
+    state.classList.toggle('hidden', !meta || !meta.hasState);
+    state.classList.toggle('sc-cmd--danger', deactivate);
+    state.querySelector('[data-bulk-label]').textContent = deactivate ? 'Deactivate' : 'Activate';
+    state.title = (deactivate ? 'Deactivate' : 'Activate') + ' the selected records';
+    state.disabled = n === 0;
+
+    document.getElementById('sel-count').textContent = n
+      ? n + (n === 1 ? ' record' : ' records') + ' selected'
+      : 'Select rows to act on them';
+    btn('clear').classList.toggle('hidden', n === 0);
   }
 
-  async function onRowAction(e) {
+  function onBulkAction(e) {
+    const btn = e.target.closest('[data-bulk]');
+    if (!btn || btn.disabled || !grid || !tableCtx) return;
+    const act = btn.dataset.bulk;
+    if (act === 'clear') { grid.clearSelection(); return; }
+    const rows = grid.getSelectedRows();
+    if (!rows.length) return;
+    const meta = tableCtx.meta;
+    if (act === 'open') openRecords(meta, rows);
+    else if (act === 'clone') openCloneDialog(meta, rows);
+    else if (act === 'state') confirmStateChange(meta, rows, activeView !== 'inactive');
+  }
+
+  // JSON viewer buttons live inside cells.
+  function onRowAction(e) {
     const jsonBtn = e.target.closest('[data-sc-json]');
-    if (jsonBtn && grid && tableCtx) {
-      const jRow = grid.byId.get(jsonBtn.dataset.id);
-      const x = tableCtx.cols.filter(function (c) { return c.attr.name === jsonBtn.dataset.scJson; })[0];
-      if (jRow && x) openJsonViewer(tableCtx.meta, x.attr, jRow, !!(x.cfg.editable && x.attr.canEdit));
-      return;
-    }
-    const btn = e.target.closest('[data-sc-act]');
-    if (!btn || !grid) return;
-    const row = grid.byId.get(btn.dataset.id);
-    if (!row) return;
-    const meta = await loadMeta(activeTable);
-    const act = btn.dataset.scAct;
-    if (act === 'open') {
-      window.open(D.envUrl + '/main.aspx?pagetype=entityrecord&etn=' + encodeURIComponent(meta.logicalName) +
-        '&id=' + encodeURIComponent(row.id), '_blank', 'noopener');
-    } else if (act === 'clone') {
-      openCloneDialog(meta, row);
-    } else if (act === 'deactivate' || act === 'activate') {
-      confirmStateChange(meta, row, act === 'deactivate');
-    }
+    if (!jsonBtn || !grid || !tableCtx) return;
+    const row = grid.byId.get(jsonBtn.dataset.id);
+    const x = tableCtx.cols.filter(function (c) { return c.attr.name === jsonBtn.dataset.scJson; })[0];
+    if (row && x) openJsonViewer(tableCtx.meta, x.attr, row, !!(x.cfg.editable && x.attr.canEdit));
   }
 
-  function confirmStateChange(meta, row, deactivate) {
-    const verb = deactivate ? 'Deactivate' : 'Activate';
+  function recordUrl(envUrl, meta, id) {
+    return envUrl + '/main.aspx?pagetype=entityrecord&etn=' + encodeURIComponent(meta.logicalName) +
+      '&id=' + encodeURIComponent(id);
+  }
+
+  function nameList(rows, max) {
+    const shown = rows.slice(0, max).map(function (r) { return '<li>' + esc(r.name) + '</li>'; }).join('');
+    const more = rows.length > max ? '<li class="sc-more">…and ' + (rows.length - max) + ' more</li>' : '';
+    return '<ul class="sc-name-list">' + shown + more + '</ul>';
+  }
+
+  function openRecords(meta, rows) {
+    const doOpen = function () {
+      // Browsers usually allow one pop-up per click; any tab they block is
+      // listed afterwards so it can still be opened by hand.
+      const blocked = [];
+      rows.forEach(function (r) {
+        const w = window.open(recordUrl(D.envUrl, meta, r.id), '_blank');
+        if (w) { try { w.opener = null; } catch (_) { /* cross-origin already */ } }
+        else blocked.push(r);
+      });
+      if (!blocked.length) return;
+      const dlg = showDialog(
+        '<div class="sc-dialog-title">Some tabs were blocked</div>' +
+        '<div class="sc-dialog-body">' +
+          '<p>The browser blocked ' + blocked.length + ' of ' + rows.length + ' tabs. Allow pop-ups for this site to open them all at once next time, or open them here:</p>' +
+          '<ul class="sc-name-list">' + blocked.map(function (r) {
+            return '<li><a class="link" href="' + esc(recordUrl(D.envUrl, meta, r.id)) + '" target="_blank" rel="noopener">' + esc(r.name) + ' ↗</a></li>';
+          }).join('') + '</ul>' +
+        '</div>' +
+        '<div class="sc-dialog-actions"><button type="button" class="btn btn--primary" data-dlg="ok">Close</button></div>'
+      );
+      dlg.el.querySelector('[data-dlg="ok"]').addEventListener('click', dlg.close);
+    };
+
+    if (rows.length <= 10) { doOpen(); return; }
     const dlg = showDialog(
-      '<div class="sc-dialog-title">' + verb + ' record?</div>' +
+      '<div class="sc-dialog-title">Open ' + rows.length + ' tabs?</div>' +
+      '<div class="sc-dialog-body"><p>This opens one browser tab per selected record.</p></div>' +
+      '<div class="sc-dialog-actions">' +
+        '<button type="button" class="btn" data-dlg="no">Cancel</button>' +
+        '<button type="button" class="btn btn--primary" data-dlg="yes">Open ' + rows.length + ' tabs</button>' +
+      '</div>'
+    );
+    dlg.el.querySelector('[data-dlg="no"]').addEventListener('click', dlg.close);
+    dlg.el.querySelector('[data-dlg="yes"]').addEventListener('click', function () { dlg.close(); doOpen(); });
+  }
+
+  function confirmStateChange(meta, rows, deactivate) {
+    const verb = deactivate ? 'Deactivate' : 'Activate';
+    const n = rows.length;
+    const dlg = showDialog(
+      '<div class="sc-dialog-title">' + verb + ' ' + (n === 1 ? 'record' : n + ' records') + '?</div>' +
       '<div class="sc-dialog-body">' +
-        '<p>' + verb + ' <strong>' + esc(row.name) + '</strong>?</p>' +
-        '<p>It will move to <em>' + (deactivate ? 'Inactive' : 'Active') + ' ' + esc(meta.plural) + '</em>.</p>' +
+        '<p>' + (n === 1 ? 'This record' : 'These records') + ' will move to <em>' + (deactivate ? 'Inactive' : 'Active') + ' ' + esc(meta.plural) + '</em>:</p>' +
+        nameList(rows, 8) +
         '<div id="sc-state-status" class="sc-status hidden"></div>' +
       '</div>' +
       '<div class="sc-dialog-actions">' +
@@ -854,24 +920,43 @@
     );
     const yes = dlg.el.querySelector('[data-dlg="yes"]');
     const no = dlg.el.querySelector('[data-dlg="no"]');
-    no.addEventListener('click', dlg.close);
+    const statusEl = dlg.el.querySelector('#sc-state-status');
+    no.addEventListener('click', function () { if (!no.disabled) dlg.close(); });
+
     yes.addEventListener('click', async function () {
       yes.disabled = true; no.disabled = true;
-      yes.textContent = deactivate ? 'Deactivating…' : 'Activating…';
       const body = { statecode: deactivate ? 1 : 0 };
       const status = deactivate ? meta.inactiveStatus : meta.activeStatus;
       if (status != null) body.statuscode = status;
-      try {
-        await D.request('/' + meta.entitySet + '(' + row.id + ')', {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: body,
-        });
-        dlg.close();
-        loadTable();
-      } catch (err) {
-        setStatus(dlg.el.querySelector('#sc-state-status'), 'err', esc(err.message));
-        yes.disabled = false; no.disabled = false;
-        yes.textContent = 'Yes, ' + verb.toLowerCase();
+
+      const failures = [];
+      for (let i = 0; i < rows.length; i++) {
+        yes.textContent = (deactivate ? 'Deactivating ' : 'Activating ') + (i + 1) + ' of ' + n + '…';
+        try {
+          await D.request('/' + meta.entitySet + '(' + rows[i].id + ')', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: body,
+          });
+        } catch (err) {
+          failures.push({ row: rows[i], error: err.message });
+        }
       }
+
+      if (!failures.length) {
+        dlg.close();
+        grid.clearSelection();
+        loadTable();
+        return;
+      }
+      const done = n - failures.length;
+      setStatus(statusEl, 'err',
+        (done ? done + ' ' + (deactivate ? 'deactivated' : 'activated') + '. ' : '') + failures.length + ' failed:' +
+        '<ul class="sc-name-list">' + failures.map(function (f) {
+          return '<li><strong>' + esc(f.row.name) + '</strong> — ' + esc(f.error) + '</li>';
+        }).join('') + '</ul>');
+      yes.classList.add('hidden');
+      no.disabled = false;
+      no.textContent = 'Close';
+      no.addEventListener('click', function () { loadTable(); }, { once: true });
     });
   }
 
@@ -886,12 +971,15 @@
     return [current].concat(envs.filter(function (e) { return originOf(e.url) !== here; }));
   }
 
-  function openCloneDialog(meta, row) {
+  function openCloneDialog(meta, rows) {
     const targets = cloneTargets();
+    const n = rows.length;
     const dlg = showDialog(
-      '<div class="sc-dialog-title">Clone record</div>' +
+      '<div class="sc-dialog-title">Clone ' + (n === 1 ? 'record' : n + ' records') + '</div>' +
       '<div class="sc-dialog-body">' +
-        '<p><strong>' + esc(row.name) + '</strong> <span class="sc-col-sub">' + esc(meta.logicalName) + '</span></p>' +
+        '<ul class="sc-results" id="sc-clone-results">' + rows.map(function (r) {
+          return '<li data-id="' + esc(r.id) + '"><span class="sc-res-icon">•</span><span class="sc-res-name">' + esc(r.name) + '</span><span class="sc-res-msg"></span></li>';
+        }).join('') + '</ul>' +
         '<p><label for="sc-clone-target">Target environment</label>' +
           '<select id="sc-clone-target">' + targets.map(function (t, i) {
             return '<option value="' + esc(t.url) + '">' + esc(t.name) + (i === 0 ? ' (this environment)' : '') + '</option>';
@@ -901,24 +989,34 @@
       '<div class="sc-dialog-actions">' +
         '<button type="button" class="btn" data-dlg="close">Close</button>' +
         '<button type="button" class="btn hidden" data-dlg="connect">Connect Target Environment</button>' +
-        '<button type="button" class="btn btn--primary" data-dlg="clone">Clone</button>' +
-      '</div>'
+        '<button type="button" class="btn btn--primary" data-dlg="clone">Clone' + (n === 1 ? '' : ' ' + n) + '</button>' +
+      '</div>',
+      n > 1
     );
     const sel = dlg.el.querySelector('#sc-clone-target');
     const statusEl = dlg.el.querySelector('#sc-clone-status');
+    const results = dlg.el.querySelector('#sc-clone-results');
     const btnClose = dlg.el.querySelector('[data-dlg="close"]');
     const btnConnect = dlg.el.querySelector('[data-dlg="connect"]');
     const btnClone = dlg.el.querySelector('[data-dlg="clone"]');
     let busy = false;
+    let pending = rows.slice(); // rows not yet cloned successfully
 
     function targetName() { return sel.options[sel.selectedIndex].textContent.replace(' (this environment)', ''); }
     function isCross() { return originOf(sel.value) !== originOf(D.envUrl); }
+    function setResult(row, kind, html) {
+      const li = results.querySelector('li[data-id="' + CSS.escape(row.id) + '"]');
+      if (!li) return;
+      li.className = kind ? 'sc-res--' + kind : '';
+      li.querySelector('.sc-res-icon').textContent = kind === 'ok' ? '✓' : kind === 'err' ? '✕' : kind === 'run' ? '…' : '•';
+      li.querySelector('.sc-res-msg').innerHTML = html || '';
+    }
 
     async function refresh() {
       btnConnect.classList.add('hidden');
       if (!isCross()) {
-        setStatus(statusEl, '', 'Creates a new copy of this record in this environment.');
-        btnClone.disabled = false;
+        setStatus(statusEl, '', 'Creates a new copy of ' + (n === 1 ? 'this record' : 'each record') + ' in this environment.');
+        btnClone.disabled = !pending.length;
         return;
       }
       btnClone.disabled = true;
@@ -926,8 +1024,8 @@
       let ready = false;
       try { ready = (await D.launcherCall('target-status', { targetOrigin: sel.value })).ready; } catch (_) { ready = false; }
       if (ready) {
-        setStatus(statusEl, 'ok', 'Connected to ' + esc(targetName()) + '. Copies this record (same ID) into that environment.');
-        btnClone.disabled = false;
+        setStatus(statusEl, 'ok', 'Connected to ' + esc(targetName()) + '. Copies ' + (n === 1 ? 'this record' : 'each record') + ' (same ID) into that environment.');
+        btnClone.disabled = !pending.length;
       } else {
         setStatus(statusEl, 'warn', 'Cloning to ' + esc(targetName()) + ' needs a live connection. Click Connect, then click the EF PPT bookmark in the new tab that opens.');
         btnConnect.classList.remove('hidden');
@@ -957,24 +1055,37 @@
     btnClone.addEventListener('click', async function () {
       const cross = isCross();
       const targetUrl = sel.value.replace(/\/$/, '');
+      const batch = pending.slice();
       busy = true;
       btnClone.disabled = true; btnClose.disabled = true; sel.disabled = true;
-      btnClone.textContent = cross ? 'Copying…' : 'Cloning…';
-      try {
-        const r = await D.launcherCall('clone-record', { etn: meta.logicalName, recordId: row.id, targetUrl: targetUrl }, 300000);
-        const url = targetUrl + '/main.aspx?pagetype=entityrecord&etn=' + encodeURIComponent(meta.logicalName) + '&id=' + encodeURIComponent(r.newId);
-        setStatus(statusEl, 'ok', (cross ? 'Copied to ' + esc(targetName()) + '. ' : 'Cloned. ') +
-          '<a href="' + esc(url) + '" target="_blank" rel="noopener">Open record ↗</a>');
-        btnClone.classList.add('hidden');
-        if (!cross) loadTable();
-      } catch (err) {
-        setStatus(statusEl, 'err', 'Clone failed: ' + esc(err.message));
-        btnClone.disabled = false;
-        btnClone.textContent = 'Retry';
-      } finally {
-        busy = false;
-        btnClose.disabled = false; sel.disabled = false;
+
+      let ok = 0;
+      for (let i = 0; i < batch.length; i++) {
+        const row = batch[i];
+        btnClone.textContent = (cross ? 'Copying ' : 'Cloning ') + (i + 1) + ' of ' + batch.length + '…';
+        setResult(row, 'run', '');
+        try {
+          const r = await D.launcherCall('clone-record', { etn: meta.logicalName, recordId: row.id, targetUrl: targetUrl }, 300000);
+          ok++;
+          pending = pending.filter(function (p) { return p !== row; });
+          setResult(row, 'ok', '<a class="link" href="' + esc(recordUrl(targetUrl, meta, r.newId)) + '" target="_blank" rel="noopener">Open ↗</a>');
+        } catch (err) {
+          setResult(row, 'err', esc(err.message));
+        }
       }
+
+      busy = false;
+      btnClose.disabled = false; sel.disabled = false;
+      const failed = batch.length - ok;
+      if (!failed) {
+        setStatus(statusEl, 'ok', (cross ? 'Copied ' : 'Cloned ') + ok + (ok === 1 ? ' record' : ' records') + (cross ? ' to ' + esc(targetName()) : '') + '.');
+        btnClone.classList.add('hidden');
+      } else {
+        setStatus(statusEl, 'err', ok + ' succeeded, ' + failed + ' failed — see the errors above. Retry clones only the failed ones.');
+        btnClone.disabled = false;
+        btnClone.textContent = 'Retry ' + failed + ' failed';
+      }
+      if (!cross && ok) loadTable();
     });
 
     refresh();

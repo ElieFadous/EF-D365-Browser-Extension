@@ -19,6 +19,8 @@
  *   editOptions(row)         — [{ value, label }] to edit with a dropdown instead of text
  *
  * Options: columns, rowKey, defaultSort, onCountChange, tableMinWidth (CSS length),
+ *   selectable + onSelectionChange(rows) — checkbox column; click selects a row,
+ *   Ctrl/Cmd-click toggles one, Shift-click selects a range, header box selects all;
  *   serverMode + onQueryChange({ search, filters, sort }) — rows are shown exactly
  *   as given and every search/filter/sort change is handed to the caller to
  *   re-query the server instead of being applied to the loaded rows.
@@ -55,6 +57,10 @@
     this.editing = null; // { id, key, draft, error, saving }
     this.tableMinWidth = opts.tableMinWidth || null;
     this.widthsFrozen = false;
+    this.selectable = !!opts.selectable;
+    this.onSelectionChange = opts.onSelectionChange || function () {};
+    this.selected = new Set(); // row ids
+    this.anchorId = null;      // for shift-click ranges
     this._build();
   }
 
@@ -100,22 +106,25 @@
 
   DataGrid.prototype._build = function () {
     const self = this;
+    const offset = this.selectable ? 1 : 0; // the checkbox column sits before the data columns
     this.host.classList.add('dg');
     this.host.innerHTML =
       '<div class="dg-scroll"><table class="dg-table"' +
         (this.tableMinWidth ? ' style="min-width:' + esc(this.tableMinWidth) + '"' : '') + '>' +
-        '<colgroup>' + this.cols.map(function (c) {
+        '<colgroup>' + (this.selectable ? '<col style="width:40px">' : '') + this.cols.map(function (c) {
           return '<col' + (c.width ? ' style="width:' + c.width + '"' : '') + '>';
         }).join('') + '</colgroup>' +
         '<thead>' +
-          '<tr class="dg-head">' + this.cols.map(function (c, i) {
+          '<tr class="dg-head">' +
+            (this.selectable ? '<th class="dg-sel"><input type="checkbox" class="dg-all-cb" title="Select all loaded rows" aria-label="Select all"></th>' : '') +
+            this.cols.map(function (c, i) {
             return '<th>' + (c.sortable === false
               ? '<span class="dg-th-label">' + esc(c.label) + '</span>'
               : '<button type="button" class="dg-sort" data-key="' + esc(c.key) + '">' +
                   '<span>' + esc(c.label) + '</span><span class="dg-arrow"></span></button>') +
-              '<span class="dg-resize" data-index="' + i + '" title="Drag to resize"></span></th>';
+              '<span class="dg-resize" data-index="' + (i + offset) + '" title="Drag to resize"></span></th>';
           }).join('') + '</tr>' +
-          '<tr class="dg-filters">' + this.cols.map(function (c) {
+          '<tr class="dg-filters">' + (this.selectable ? '<th class="dg-sel"></th>' : '') + this.cols.map(function (c) {
             return '<th>' + self._filterHtml(c) + '</th>';
           }).join('') + '</tr>' +
         '</thead>' +
@@ -160,6 +169,38 @@
       else if (act === 'save') self._saveEdit();
       else if (act === 'cancel') self._cancelEdit();
     });
+    if (this.selectable) {
+      this.host.querySelector('.dg-all-cb').addEventListener('change', function (e) {
+        self.selected = e.target.checked
+          ? new Set(self._visibleRows().map(function (r) { return String(self.rowKey(r)); }))
+          : new Set();
+        self.anchorId = null;
+        self._syncSelection();
+      });
+      this.tbody.addEventListener('click', function (e) {
+        const tr = e.target.closest('tr[data-id]');
+        if (!tr) return;
+        const id = tr.dataset.id;
+        if (e.target.classList.contains('dg-row-cb')) {
+          if (e.shiftKey && self.anchorId) self._selectRange(self.anchorId, id, true);
+          else { self._toggle(id); self.anchorId = id; }
+          self._syncSelection();
+          return;
+        }
+        // Leave clicks on controls and open editors alone.
+        if (e.target.closest('a, button, input, select, textarea, label, .dg-editing')) return;
+        if (e.shiftKey && self.anchorId) {
+          self._selectRange(self.anchorId, id, !(e.ctrlKey || e.metaKey));
+        } else if (e.ctrlKey || e.metaKey) {
+          self._toggle(id);
+          self.anchorId = id;
+        } else {
+          self.selected = new Set([id]);
+          self.anchorId = id;
+        }
+        self._syncSelection();
+      });
+    }
     this.tbody.addEventListener('dblclick', function (e) {
       const td = e.target.closest('td.dg-editable');
       if (!td || td.classList.contains('dg-editing')) return;
@@ -172,6 +213,53 @@
     });
 
     if (this.serverMode) this._refreshOptions();
+  };
+
+  // ── Row selection ─────────────────────────────────────────────────────
+
+  DataGrid.prototype._toggle = function (id) {
+    if (this.selected.has(id)) this.selected.delete(id);
+    else this.selected.add(id);
+  };
+
+  /** Selects every visible row between two ids (inclusive); `replace` drops the rest of the selection. */
+  DataGrid.prototype._selectRange = function (fromId, toId, replace) {
+    const self = this;
+    const ids = this._visibleRows().map(function (r) { return String(self.rowKey(r)); });
+    const a = ids.indexOf(fromId), b = ids.indexOf(toId);
+    if (a === -1 || b === -1) { this.selected = new Set([toId]); this.anchorId = toId; return; }
+    if (replace) this.selected = new Set();
+    ids.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(function (id) { self.selected.add(id); });
+  };
+
+  /** Reflects this.selected in the DOM without re-rendering rows, then notifies the caller. */
+  DataGrid.prototype._syncSelection = function () {
+    const self = this;
+    this.tbody.querySelectorAll('tr[data-id]').forEach(function (tr) {
+      const on = self.selected.has(tr.dataset.id);
+      tr.classList.toggle('dg-selected', on);
+      const cb = tr.querySelector('.dg-row-cb');
+      if (cb) cb.checked = on;
+    });
+    const all = this.host.querySelector('.dg-all-cb');
+    if (all) {
+      const visible = this._visibleRows().length;
+      const n = this.selected.size;
+      all.checked = visible > 0 && n >= visible;
+      all.indeterminate = n > 0 && n < visible;
+    }
+    this.onSelectionChange(this.getSelectedRows());
+  };
+
+  DataGrid.prototype.getSelectedRows = function () {
+    const self = this;
+    return this.rows.filter(function (r) { return self.selected.has(String(self.rowKey(r))); });
+  };
+
+  DataGrid.prototype.clearSelection = function () {
+    this.selected = new Set();
+    this.anchorId = null;
+    this._syncSelection();
   };
 
   // ── Column resizing ───────────────────────────────────────────────────
@@ -254,9 +342,13 @@
     this.byId = new Map();
     rows.forEach(function (r) { self.byId.set(String(self.rowKey(r)), r); });
     this.editing = null;
+    // Keep the selection for rows that are still loaded; drop the rest.
+    this.selected = new Set(Array.from(this.selected).filter(function (id) { return self.byId.has(id); }));
+    if (this.anchorId && !this.byId.has(this.anchorId)) this.anchorId = null;
     if (!this.serverMode) this._refreshOptions();
     this._renderHead();
     this._renderBody();
+    if (this.selectable) this._syncSelection();
   };
 
   DataGrid.prototype._refreshOptions = function () {
@@ -416,12 +508,17 @@
     this.onCount(rows.length, this.rows.length);
     if (!rows.length) {
       const filtered = this.serverMode ? !!(this.search || Object.keys(this.filters).length) : this.rows.length;
-      this.tbody.innerHTML = '<tr><td class="dg-empty" colspan="' + this.cols.length + '">' +
+      this.tbody.innerHTML = '<tr><td class="dg-empty" colspan="' + (this.cols.length + (this.selectable ? 1 : 0)) + '">' +
         (filtered ? 'No rows match the current search or filters.' : 'No records found.') + '</td></tr>';
       return;
     }
     this.tbody.innerHTML = rows.map(function (r) {
-      return '<tr data-id="' + esc(self.rowKey(r)) + '">' +
+      const id = String(self.rowKey(r));
+      const on = self.selectable && self.selected.has(id);
+      return '<tr data-id="' + esc(id) + '"' + (on ? ' class="dg-selected"' : '') + '>' +
+        (self.selectable
+          ? '<td class="dg-sel"><input type="checkbox" class="dg-row-cb" aria-label="Select row"' + (on ? ' checked' : '') + '></td>'
+          : '') +
         self.cols.map(function (c) { return self._cellHtml(r, c); }).join('') + '</tr>';
     }).join('');
   };
