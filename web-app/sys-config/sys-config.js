@@ -981,6 +981,13 @@
       ? 'Cloning this table is turned off by the clone whitelist in your config'
       : 'Clone the selected records';
 
+    const compare = btn('compare');
+    const others = cloneTargets().length > 1;
+    compare.disabled = n === 0 || !others;
+    compare.title = others
+      ? 'Compare the selected records with other environments'
+      : 'Add more environments to your config to compare records between them';
+
     const state = btn('state');
     const deactivate = activeView !== 'inactive';
     state.classList.toggle('hidden', !meta || !meta.hasState);
@@ -1005,6 +1012,7 @@
     const meta = tableCtx.meta;
     if (act === 'open') openRecords(meta, rows);
     else if (act === 'clone') openCloneDialog(meta, rows);
+    else if (act === 'compare') openCloneDialog(meta, rows, true);
     else if (act === 'state') confirmStateChange(meta, rows, activeView !== 'inactive');
   }
 
@@ -1138,14 +1146,15 @@
 
   const CHEVRON = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>';
 
-  function openCloneDialog(meta, rows) {
-    const targets = cloneTargets();
+  function openCloneDialog(meta, rows, compareOnly) {
+    const allTargets = cloneTargets();
+    const targets = compareOnly ? allTargets.filter(function (t) { return !t.here; }) : allTargets;
     const byOrigin = new Map(targets.map(function (t) { return [t.origin, t]; }));
     const n = rows.length;
     const dlg = showDialog(
-      '<div class="sc-dialog-title">Clone ' + (n === 1 ? 'record' : n + ' records') + '</div>' +
+      '<div class="sc-dialog-title">' + (compareOnly ? 'Compare ' : 'Clone ') + (n === 1 ? 'record' : n + ' records') + '</div>' +
       '<div class="sc-dialog-body sc-clone-body">' +
-        '<div class="sc-field-label">Target environments</div>' +
+        '<div class="sc-field-label">' + (compareOnly ? 'Compare with' : 'Target environments') + '</div>' +
         '<div class="sc-ms" id="sc-ms">' +
           '<button type="button" class="sc-ms-btn" aria-haspopup="listbox" aria-expanded="false">' +
             '<span class="sc-ms-label"></span>' + CHEVRON +
@@ -1163,17 +1172,19 @@
           '</div>' +
         '</div>' +
         '<ul class="sc-targets" id="sc-targets"></ul>' +
-        '<div class="sc-matrix-wrap"><table class="sc-matrix" id="sc-matrix"></table></div>' +
+        (compareOnly ? '<div class="sc-field-label">Records</div>' + nameList(rows, 12) : '') +
+        '<div class="sc-matrix-wrap' + (compareOnly ? ' hidden' : '') + '"><table class="sc-matrix" id="sc-matrix"></table></div>' +
         '<div id="sc-clone-status" class="sc-status hidden"></div>' +
       '</div>' +
       '<div class="sc-dialog-actions">' +
         '<button type="button" class="btn" data-dlg="close">Close</button>' +
         '<span class="toolbar-spacer"></span>' +
-        '<button type="button" class="btn" data-dlg="compare" disabled>Compare</button>' +
-        '<button type="button" class="btn btn--primary" data-dlg="clone" disabled>Clone</button>' +
+        '<button type="button" class="btn' + (compareOnly ? ' btn--primary' : '') + '" data-dlg="compare" disabled>Compare</button>' +
+        '<button type="button" class="btn btn--primary' + (compareOnly ? ' hidden' : '') + '" data-dlg="clone" disabled>Clone</button>' +
       '</div>',
       'wide'
     );
+    dlg.el.querySelector('.sc-dialog').classList.add('sc-dialog--clone');
     const ms = dlg.el.querySelector('#sc-ms');
     const msBtn = ms.querySelector('.sc-ms-btn');
     const msPanel = ms.querySelector('.sc-ms-panel');
@@ -1274,9 +1285,11 @@
         btnClone.textContent = done ? 'Cloned' : pend < total ? 'Clone remaining (' + pend + ')' : 'Clone';
       }
       btnCompare.disabled = busy || !crossSelected().length || !crossSelected().every(function (t) { return conn.get(t.origin) === 'ok'; });
-      btnCompare.title = selected.length && !crossSelected().length
-        ? 'Compare needs at least one other environment — a clone here always creates new records'
-        : 'Compare the selected records with the target environments before cloning';
+      btnCompare.title = compareOnly
+        ? 'Compare the records side by side with the chosen environments'
+        : selected.length && !crossSelected().length
+          ? 'Compare needs at least one other environment — a clone here always creates new records'
+          : 'Compare the selected records with the target environments before cloning';
       btnClose.disabled = busy;
       msBtn.disabled = busy;
     }
@@ -1312,11 +1325,41 @@
       render();
     }
 
+    function placePanel() {
+      if (msPanel.classList.contains('hidden')) return;
+      const r = msBtn.getBoundingClientRect();
+      const below = window.innerHeight - r.bottom - 12;
+      const above = r.top - 12;
+      const want = Math.min(msPanel.scrollHeight, 300);
+      msPanel.style.left = r.left + 'px';
+      msPanel.style.width = r.width + 'px';
+      if (below < want && above > below) {
+        msPanel.style.top = '';
+        msPanel.style.bottom = (window.innerHeight - r.top + 4) + 'px';
+        msPanel.style.maxHeight = Math.min(300, above) + 'px';
+      } else {
+        msPanel.style.bottom = '';
+        msPanel.style.top = (r.bottom + 4) + 'px';
+        msPanel.style.maxHeight = Math.min(300, below) + 'px';
+      }
+    }
+
     function openPanel(open) {
       msPanel.classList.toggle('hidden', !open);
       msBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
       ms.classList.toggle('open', open);
+      placePanel();
     }
+
+    function onViewportChange() {
+      if (!document.body.contains(dlg.el)) {
+        window.removeEventListener('resize', onViewportChange);
+        return;
+      }
+      placePanel();
+    }
+    window.addEventListener('resize', onViewportChange);
+    dlg.el.querySelector('.sc-clone-body').addEventListener('scroll', placePanel);
 
     msBtn.addEventListener('click', function () { openPanel(msPanel.classList.contains('hidden')); });
     msPanel.addEventListener('change', function (e) {
@@ -1352,7 +1395,7 @@
 
     btnCompare.addEventListener('click', function () {
       if (btnCompare.disabled) return;
-      openCompareDialog(meta, rows, targets[0], crossSelected());
+      openCompareDialog(meta, rows, allTargets[0], crossSelected(), compareOnly);
     });
 
     btnClone.addEventListener('click', async function () {
@@ -1445,9 +1488,9 @@
     return a.type === 'String' || a.type === 'Memo' ? (rec[a.name] == null ? '' : String(rec[a.name])) : shown;
   }
 
-  function openCompareDialog(meta, rows, source, targets) {
+  function openCompareDialog(meta, rows, source, targets, standalone) {
     const dlg = showDialog(
-      '<div class="sc-dialog-title">Compare before cloning ' +
+      '<div class="sc-dialog-title">' + (standalone ? 'Compare records ' : 'Compare before cloning ') +
         '<span class="sc-dialog-sub">' + esc(source.name) + ' → ' + targets.map(function (t) { return esc(t.name); }).join(', ') + '</span>' +
       '</div>' +
       '<div class="sc-dialog-body sc-cmp-body">' +

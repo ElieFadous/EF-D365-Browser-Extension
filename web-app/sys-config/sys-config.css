@@ -258,7 +258,9 @@
 
 .sc-dialog-sub { margin-left: 8px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
 .sc-field-label { font-size: 12px; font-weight: 600; margin-bottom: -6px; }
-.sc-clone-body { display: flex; flex-direction: column; gap: 10px; }
+.sc-dialog--clone { max-width: 860px; min-height: min(540px, 86vh); }
+.sc-clone-body { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.sc-clone-body .sc-name-list { margin-top: 0; max-height: 30vh; overflow-y: auto; }
 .sc-clone-body .sc-status { margin-top: 0; }
 
 .sc-ms { position: relative; }
@@ -275,8 +277,8 @@
 .sc-ms-btn svg { width: 12px; height: 12px; flex-shrink: 0; fill: none; stroke: var(--text-muted); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s; }
 .sc-ms.open .sc-ms-btn svg { transform: rotate(180deg); }
 .sc-ms-panel {
-  position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; right: 0;
-  max-height: 260px; overflow-y: auto; padding: 4px;
+  position: fixed; z-index: 1000;
+  max-height: 300px; overflow-y: auto; padding: 4px;
   background: #fff; border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 10px 28px rgba(15,23,42,0.18);
 }
