@@ -40,6 +40,11 @@
   const LOOKUP_TYPES   = new Set(['Lookup', 'Customer', 'Owner']);
   const SKIP_TYPES     = new Set(['EntityName', 'ManagedProperty', 'CalendarRules', 'PartyList']);
   const CHOICE_TYPES   = new Set(['Picklist', 'Boolean', 'State', 'Status']);
+  const CLONE_EXCLUDE  = new Set([
+    'createdon', 'modifiedon', 'overriddencreatedon', 'createdby', 'modifiedby', 'createdonbehalfby',
+    'modifiedonbehalfby', 'versionnumber', 'exchangerate', 'importsequencenumber',
+    'timezoneruleversionnumber', 'utcconversiontimezonecode', 'owningbusinessunit', 'owninguser', 'owningteam',
+  ]);
 
   let settings = { version: 1, tables: [] };   // what this environment uses
   let shared = null;          // { updatedAt, settings, excluded: [envKey] } — null until anything is saved/seeded
@@ -284,7 +289,7 @@
     const none = function () { return { value: [] }; };
     const results = await Promise.all([
       D.request(base + '?$select=LogicalName,DisplayName,DisplayCollectionName,EntitySetName,PrimaryIdAttribute,PrimaryNameAttribute'),
-      D.request(base + '/Attributes?$select=LogicalName,DisplayName,AttributeType,AttributeTypeName,IsValidForRead,IsValidForUpdate,AttributeOf'),
+      D.request(base + '/Attributes?$select=LogicalName,DisplayName,AttributeType,AttributeTypeName,IsValidForRead,IsValidForUpdate,IsValidForCreate,AttributeOf'),
       D.request(base + '/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet').catch(none),
       D.request(base + '/Attributes/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet').catch(none),
       D.request(base + '/Attributes/Microsoft.Dynamics.CRM.StateAttributeMetadata?$select=LogicalName&$expand=OptionSet').catch(none),
@@ -340,6 +345,8 @@
           canEdit: !reason,
           editReason: reason,
           isSystem: SYSTEM_ATTRS.has(a.LogicalName) || a.LogicalName === def.PrimaryIdAttribute,
+          cloned: a.IsValidForCreate !== false && !CLONE_EXCLUDE.has(a.LogicalName) &&
+            a.AttributeType !== 'Virtual' && a.AttributeType !== 'Uniqueidentifier',
         };
       })
       .sort(function (x, y) { return x.label.localeCompare(y.label, undefined, { sensitivity: 'base' }); });
@@ -1123,127 +1130,602 @@
     const envs = Array.isArray(D.cfg.environments) ? D.cfg.environments : [];
     const here = originOf(D.envUrl);
     const current = envs.filter(function (e) { return originOf(e.url) === here; })[0] || { name: D.envName, url: D.envUrl };
-    return [current].concat(envs.filter(function (e) { return originOf(e.url) !== here; }));
+    return [current].concat(envs.filter(function (e) { return e && e.url && originOf(e.url) !== here; }))
+      .map(function (e, i) {
+        return { name: e.name || e.url, url: String(e.url).replace(/\/+$/, ''), origin: originOf(e.url), here: i === 0 };
+      });
   }
+
+  const CHEVRON = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>';
 
   function openCloneDialog(meta, rows) {
     const targets = cloneTargets();
+    const byOrigin = new Map(targets.map(function (t) { return [t.origin, t]; }));
     const n = rows.length;
     const dlg = showDialog(
       '<div class="sc-dialog-title">Clone ' + (n === 1 ? 'record' : n + ' records') + '</div>' +
-      '<div class="sc-dialog-body">' +
-        '<ul class="sc-results" id="sc-clone-results">' + rows.map(function (r) {
-          return '<li data-id="' + esc(r.id) + '"><span class="sc-res-icon">•</span><span class="sc-res-name">' + esc(r.name) + '</span><span class="sc-res-msg"></span></li>';
-        }).join('') + '</ul>' +
-        '<p><label for="sc-clone-target">Target environment</label>' +
-          '<select id="sc-clone-target">' + targets.map(function (t, i) {
-            return '<option value="' + esc(t.url) + '">' + esc(t.name) + (i === 0 ? ' (this environment)' : '') + '</option>';
-          }).join('') + '</select></p>' +
-        '<div id="sc-clone-status" class="sc-status"></div>' +
+      '<div class="sc-dialog-body sc-clone-body">' +
+        '<div class="sc-field-label">Target environments</div>' +
+        '<div class="sc-ms" id="sc-ms">' +
+          '<button type="button" class="sc-ms-btn" aria-haspopup="listbox" aria-expanded="false">' +
+            '<span class="sc-ms-label"></span>' + CHEVRON +
+          '</button>' +
+          '<div class="sc-ms-panel hidden" role="listbox" aria-multiselectable="true">' +
+            targets.map(function (t) {
+              return (
+                '<label class="sc-ms-opt">' +
+                  '<input type="checkbox" value="' + esc(t.origin) + '">' +
+                  '<span class="sc-ms-name">' + esc(t.name) + (t.here ? ' <em>(this environment)</em>' : '') + '</span>' +
+                  '<span class="sc-ms-url">' + esc(t.url.replace(/^https?:\/\//, '')) + '</span>' +
+                '</label>'
+              );
+            }).join('') +
+          '</div>' +
+        '</div>' +
+        '<ul class="sc-targets" id="sc-targets"></ul>' +
+        '<div class="sc-matrix-wrap"><table class="sc-matrix" id="sc-matrix"></table></div>' +
+        '<div id="sc-clone-status" class="sc-status hidden"></div>' +
       '</div>' +
       '<div class="sc-dialog-actions">' +
         '<button type="button" class="btn" data-dlg="close">Close</button>' +
-        '<button type="button" class="btn hidden" data-dlg="connect">Connect Target Environment</button>' +
-        '<button type="button" class="btn btn--primary" data-dlg="clone">Clone' + (n === 1 ? '' : ' ' + n) + '</button>' +
+        '<span class="toolbar-spacer"></span>' +
+        '<button type="button" class="btn" data-dlg="compare" disabled>Compare</button>' +
+        '<button type="button" class="btn btn--primary" data-dlg="clone" disabled>Clone</button>' +
       '</div>',
-      n > 1
+      'wide'
     );
-    const sel = dlg.el.querySelector('#sc-clone-target');
+    const ms = dlg.el.querySelector('#sc-ms');
+    const msBtn = ms.querySelector('.sc-ms-btn');
+    const msPanel = ms.querySelector('.sc-ms-panel');
+    const targetsEl = dlg.el.querySelector('#sc-targets');
+    const matrix = dlg.el.querySelector('#sc-matrix');
     const statusEl = dlg.el.querySelector('#sc-clone-status');
-    const results = dlg.el.querySelector('#sc-clone-results');
     const btnClose = dlg.el.querySelector('[data-dlg="close"]');
-    const btnConnect = dlg.el.querySelector('[data-dlg="connect"]');
+    const btnCompare = dlg.el.querySelector('[data-dlg="compare"]');
     const btnClone = dlg.el.querySelector('[data-dlg="clone"]');
+
+    const selected = [];
+    const conn = new Map();
+    const results = new Map();
     let busy = false;
-    let pending = rows.slice(); // rows not yet cloned successfully
+    let connecting = null;
 
-    function targetName() { return sel.options[sel.selectedIndex].textContent.replace(' (this environment)', ''); }
-    function isCross() { return originOf(sel.value) !== originOf(D.envUrl); }
-    function setResult(row, kind, html) {
-      const li = results.querySelector('li[data-id="' + CSS.escape(row.id) + '"]');
-      if (!li) return;
-      li.className = kind ? 'sc-res--' + kind : '';
-      li.querySelector('.sc-res-icon').textContent = kind === 'ok' ? '✓' : kind === 'err' ? '✕' : kind === 'run' ? '…' : '•';
-      li.querySelector('.sc-res-msg').innerHTML = html || '';
+    function key(row, origin) { return row.id + '|' + origin; }
+    function selTargets() { return targets.filter(function (t) { return selected.indexOf(t.origin) !== -1; }); }
+    function crossSelected() { return selTargets().filter(function (t) { return !t.here; }); }
+    function ready() {
+      return selected.length > 0 && selTargets().every(function (t) { return t.here || conn.get(t.origin) === 'ok'; });
+    }
+    function pendingPairs() {
+      const out = [];
+      selTargets().forEach(function (t) {
+        rows.forEach(function (r) {
+          const res = results.get(key(r, t.origin));
+          if (!res || res.kind !== 'ok') out.push({ row: r, target: t });
+        });
+      });
+      return out;
     }
 
-    async function refresh() {
-      btnConnect.classList.add('hidden');
-      if (!isCross()) {
-        setStatus(statusEl, '', 'Creates a new copy of ' + (n === 1 ? 'this record' : 'each record') + ' in this environment.');
-        btnClone.disabled = !pending.length;
-        return;
-      }
-      btnClone.disabled = true;
-      setStatus(statusEl, '', 'Checking connection…');
-      let ready = false;
-      try { ready = (await D.launcherCall('target-status', { targetOrigin: sel.value })).ready; } catch (_) { ready = false; }
-      if (ready) {
-        setStatus(statusEl, 'ok', 'Connected to ' + esc(targetName()) + '. Copies ' + (n === 1 ? 'this record' : 'each record') + ' (same ID) into that environment.');
-        btnClone.disabled = !pending.length;
-      } else {
-        setStatus(statusEl, 'warn', 'Cloning to ' + esc(targetName()) + ' needs a live connection. Click Connect, then click the EF PPT bookmark in the new tab that opens.');
-        btnConnect.classList.remove('hidden');
-      }
+    function renderLabel() {
+      const label = ms.querySelector('.sc-ms-label');
+      const names = selTargets().map(function (t) { return t.name; });
+      label.textContent = names.length ? names.join(', ') : 'Choose one or more environments…';
+      label.classList.toggle('sc-ms-placeholder', !names.length);
     }
 
-    sel.addEventListener('change', function () { if (!busy) refresh(); });
+    function renderTargets() {
+      const list = selTargets();
+      targetsEl.innerHTML = list.map(function (t) {
+        const c = t.here ? 'here' : conn.get(t.origin) || 'checking';
+        let chip, extra = '';
+        if (c === 'here') chip = '<span class="sc-chip">Creates new copies here</span>';
+        else if (c === 'ok') chip = '<span class="sc-chip sc-chip--ok">Connected</span>';
+        else if (c === 'checking') chip = '<span class="sc-chip">Checking…</span>';
+        else if (c === 'connecting') chip = '<span class="sc-chip sc-chip--warn">Waiting — click the EF PPT bookmark in the new tab</span>';
+        else {
+          chip = '<span class="sc-chip sc-chip--warn">Not connected</span>';
+          extra = '<button type="button" class="btn sc-btn-sm" data-connect="' + esc(t.origin) + '"' + (busy || connecting ? ' disabled' : '') + '>Connect</button>';
+        }
+        return (
+          '<li>' +
+            '<span class="sc-target-name">' + esc(t.name) + '</span>' +
+            '<span class="sc-target-url">' + esc(t.url.replace(/^https?:\/\//, '')) + '</span>' +
+            chip + extra +
+          '</li>'
+        );
+      }).join('');
+      targetsEl.classList.toggle('hidden', !list.length);
+    }
+
+    function cellHtml(row, t) {
+      const res = results.get(key(row, t.origin));
+      if (!res) return '<td class="sc-mx-cell"><span class="sc-mx-icon">·</span></td>';
+      const icon = res.kind === 'ok' ? '✓' : res.kind === 'err' ? '✕' : '…';
+      return (
+        '<td class="sc-mx-cell sc-res--' + res.kind + '"' + (res.title ? ' title="' + esc(res.title) + '"' : '') + '>' +
+          '<span class="sc-mx-icon">' + icon + '</span><span class="sc-mx-msg">' + (res.html || '') + '</span>' +
+        '</td>'
+      );
+    }
+
+    function renderMatrix() {
+      const list = selTargets();
+      matrix.innerHTML =
+        '<thead><tr><th>Record</th>' +
+          (list.length
+            ? list.map(function (t) { return '<th>' + esc(t.name) + '</th>'; }).join('')
+            : '<th class="sc-mx-none">No target chosen</th>') +
+        '</tr></thead><tbody>' +
+        rows.map(function (r) {
+          return '<tr><td class="sc-mx-name">' + esc(r.name) + '</td>' +
+            (list.length ? list.map(function (t) { return cellHtml(r, t); }).join('') : '<td></td>') +
+          '</tr>';
+        }).join('') +
+        '</tbody>';
+    }
+
+    function renderButtons() {
+      const pend = pendingPairs().length;
+      const done = selected.length > 0 && pend === 0;
+      btnClone.disabled = busy || !ready() || !pend;
+      if (!busy) {
+        const total = selected.length * n;
+        btnClone.textContent = done ? 'Cloned' : pend < total ? 'Clone remaining (' + pend + ')' : 'Clone';
+      }
+      btnCompare.disabled = busy || !crossSelected().length || !crossSelected().every(function (t) { return conn.get(t.origin) === 'ok'; });
+      btnCompare.title = selected.length && !crossSelected().length
+        ? 'Compare needs at least one other environment — a clone here always creates new records'
+        : 'Compare the selected records with the target environments before cloning';
+      btnClose.disabled = busy;
+      msBtn.disabled = busy;
+    }
+
+    function render() {
+      renderLabel();
+      renderTargets();
+      renderMatrix();
+      renderButtons();
+    }
+
+    async function check(t) {
+      if (t.here) return;
+      if (conn.get(t.origin) !== 'connecting') conn.set(t.origin, 'checking');
+      render();
+      let ok = false;
+      try { ok = (await D.launcherCall('target-status', { targetOrigin: t.url })).ready; } catch (_) { ok = false; }
+      if (conn.get(t.origin) === 'connecting') return;
+      conn.set(t.origin, ok ? 'ok' : 'off');
+      render();
+    }
+
+    function toggleTarget(origin, on) {
+      const i = selected.indexOf(origin);
+      if (on && i === -1) {
+        selected.push(origin);
+        const t = byOrigin.get(origin);
+        if (t && !t.here && conn.get(t.origin) !== 'ok') check(t);
+      } else if (!on && i !== -1) {
+        selected.splice(i, 1);
+      }
+      statusEl.className = 'sc-status hidden';
+      render();
+    }
+
+    function openPanel(open) {
+      msPanel.classList.toggle('hidden', !open);
+      msBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      ms.classList.toggle('open', open);
+    }
+
+    msBtn.addEventListener('click', function () { openPanel(msPanel.classList.contains('hidden')); });
+    msPanel.addEventListener('change', function (e) {
+      if (e.target.matches('input[type="checkbox"]')) toggleTarget(e.target.value, e.target.checked);
+    });
+    dlg.el.addEventListener('mousedown', function (e) {
+      if (!msPanel.classList.contains('hidden') && !ms.contains(e.target)) openPanel(false);
+    });
+    msPanel.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.stopPropagation(); openPanel(false); msBtn.focus(); }
+    });
+
+    targetsEl.addEventListener('click', async function (e) {
+      const b = e.target.closest('[data-connect]');
+      if (!b || b.disabled || busy || connecting) return;
+      const t = byOrigin.get(b.dataset.connect);
+      connecting = t.origin;
+      conn.set(t.origin, 'connecting');
+      render();
+      try {
+        await D.launcherCall('connect-target', { targetOrigin: t.origin }, 130000);
+        conn.set(t.origin, 'checking');
+      } catch (err) {
+        conn.set(t.origin, 'off');
+        setStatus(statusEl, 'err', 'Couldn’t connect to ' + esc(t.name) + ': ' + esc(err.message));
+      }
+      connecting = null;
+      if (conn.get(t.origin) === 'checking') await check(t);
+      else render();
+    });
+
     btnClose.addEventListener('click', function () { if (!busy) dlg.close(); });
 
-    btnConnect.addEventListener('click', async function () {
-      busy = true;
-      btnConnect.disabled = true; sel.disabled = true;
-      btnConnect.textContent = 'Waiting for the new tab…';
-      try {
-        await D.launcherCall('connect-target', { targetOrigin: originOf(sel.value) }, 130000);
-        busy = false;
-        await refresh();
-      } catch (err) {
-        busy = false;
-        setStatus(statusEl, 'err', esc(err.message));
-      } finally {
-        btnConnect.disabled = false; sel.disabled = false;
-        btnConnect.textContent = 'Connect Target Environment';
-      }
+    btnCompare.addEventListener('click', function () {
+      if (btnCompare.disabled) return;
+      openCompareDialog(meta, rows, targets[0], crossSelected());
     });
 
     btnClone.addEventListener('click', async function () {
-      const cross = isCross();
-      const targetUrl = sel.value.replace(/\/$/, '');
-      const batch = pending.slice();
+      if (btnClone.disabled) return;
+      const pairs = pendingPairs();
+      const total = pairs.length;
+      let finished = 0;
       busy = true;
-      btnClone.disabled = true; btnClose.disabled = true; sel.disabled = true;
+      statusEl.className = 'sc-status hidden';
+      openPanel(false);
+      pairs.forEach(function (p) { results.set(key(p.row, p.target.origin), { kind: 'wait', html: '' }); });
+      btnClone.textContent = 'Cloning 0 of ' + total + '…';
+      render();
 
-      let ok = 0;
-      for (let i = 0; i < batch.length; i++) {
-        const row = batch[i];
-        btnClone.textContent = (cross ? 'Copying ' : 'Cloning ') + (i + 1) + ' of ' + batch.length + '…';
-        setResult(row, 'run', '');
-        try {
-          const r = await D.launcherCall('clone-record', { etn: meta.logicalName, recordId: row.id, targetUrl: targetUrl }, 300000);
-          ok++;
-          pending = pending.filter(function (p) { return p !== row; });
-          setResult(row, 'ok', '<a class="link" href="' + esc(recordUrl(targetUrl, meta, r.newId)) + '" target="_blank" rel="noopener">Open ↗</a>');
-        } catch (err) {
-          setResult(row, 'err', esc(err.message));
+      const byTarget = new Map();
+      pairs.forEach(function (p) {
+        if (!byTarget.has(p.target.origin)) byTarget.set(p.target.origin, []);
+        byTarget.get(p.target.origin).push(p);
+      });
+      await Promise.all([...byTarget.values()].map(async function (list) {
+        for (let i = 0; i < list.length; i++) {
+          const p = list[i];
+          const k = key(p.row, p.target.origin);
+          results.set(k, { kind: 'run', html: '' });
+          renderMatrix();
+          try {
+            const r = await D.launcherCall('clone-record', { etn: meta.logicalName, recordId: p.row.id, targetUrl: p.target.url }, 300000);
+            results.set(k, {
+              kind: 'ok',
+              html: '<a class="link" href="' + esc(recordUrl(p.target.url, meta, r.newId)) + '" target="_blank" rel="noopener">Open ↗</a>',
+            });
+          } catch (err) {
+            results.set(k, { kind: 'err', html: esc(err.message), title: err.message });
+          }
+          finished++;
+          btnClone.textContent = 'Cloning ' + finished + ' of ' + total + '…';
+          renderMatrix();
         }
-      }
+      }));
 
       busy = false;
-      btnClose.disabled = false; sel.disabled = false;
-      const failed = batch.length - ok;
-      if (!failed) {
-        setStatus(statusEl, 'ok', (cross ? 'Copied ' : 'Cloned ') + ok + (ok === 1 ? ' record' : ' records') + (cross ? ' to ' + esc(targetName()) : '') + '.');
-        btnClone.classList.add('hidden');
-      } else {
-        setStatus(statusEl, 'err', ok + ' succeeded, ' + failed + ' failed — see the errors above. Retry clones only the failed ones.');
-        btnClone.disabled = false;
-        btnClone.textContent = 'Retry ' + failed + ' failed';
-      }
-      if (!cross && ok) loadTable();
+      const failed = pairs.filter(function (p) { return results.get(key(p.row, p.target.origin)).kind === 'err'; }).length;
+      const ok = total - failed;
+      if (!failed) setStatus(statusEl, 'ok', 'Cloned ' + ok + ' of ' + total + '. Pick more environments above to clone again.');
+      else setStatus(statusEl, 'err', ok + ' succeeded, ' + failed + ' failed — hover a ✕ for the full error. Clone retries only what hasn’t succeeded.');
+      render();
+      if (pairs.some(function (p) { return p.target.here && results.get(key(p.row, p.target.origin)).kind === 'ok'; })) loadTable();
     });
 
-    refresh();
+    render();
+  }
+
+  function apiPath() {
+    return D.apiBase.slice(D.envUrl.length);
+  }
+
+  async function fetchFullRecords(baseUrl, meta, ids) {
+    const out = new Map();
+    for (let i = 0; i < ids.length; i += 15) {
+      const chunk = ids.slice(i, i + 15);
+      const filter = chunk.map(function (id) { return meta.primaryId + ' eq ' + id; }).join(' or ');
+      const path = '/' + meta.entitySet + '?$filter=' + encodeURIComponent(filter);
+      const d = await D.request(baseUrl ? baseUrl + apiPath() + path : path, { headers: { Prefer: D.FORMATTED } });
+      (d.value || []).forEach(function (rec) { out.set(String(rec[meta.primaryId]).toLowerCase(), rec); });
+    }
+    return out;
+  }
+
+  function rawValue(a, rec) {
+    const v = rec[selectName(a)];
+    if (v === null || v === undefined || v === '') return '';
+    if (LOOKUP_TYPES.has(a.type) || a.type === 'Uniqueidentifier') return String(v).toLowerCase();
+    if (a.type === 'MultiSelectPicklist') return String(v).split(',').map(function (s) { return s.trim(); }).sort().join(',');
+    return typeof v === 'object' ? JSON.stringify(v) : String(v);
+  }
+
+  function shownValue(a, rec) {
+    const k = selectName(a);
+    const f = rec[k + '@OData.Community.Display.V1.FormattedValue'];
+    const v = rec[k];
+    if (v === null || v === undefined || v === '') return '';
+    if (typeof v === 'string' && (a.type === 'String' || a.type === 'Memo')) return v;
+    return f != null ? String(f) : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  }
+
+  function diffText(a, rec) {
+    const shown = shownValue(a, rec);
+    if (LOOKUP_TYPES.has(a.type) && shown) return shown + '\n' + rawValue(a, rec);
+    if (CHOICE_TYPES.has(a.type) && shown) return shown + ' (' + rawValue(a, rec) + ')';
+    return a.type === 'String' || a.type === 'Memo' ? (rec[a.name] == null ? '' : String(rec[a.name])) : shown;
+  }
+
+  function openCompareDialog(meta, rows, source, targets) {
+    const dlg = showDialog(
+      '<div class="sc-dialog-title">Compare before cloning ' +
+        '<span class="sc-dialog-sub">' + esc(source.name) + ' → ' + targets.map(function (t) { return esc(t.name); }).join(', ') + '</span>' +
+      '</div>' +
+      '<div class="sc-dialog-body sc-cmp-body">' +
+        '<div class="sc-cmp' + (rows.length > 1 ? '' : ' sc-cmp--single') + '">' +
+          '<aside class="sc-cmp-side"><ul id="sc-cmp-records" class="sc-cmp-records"></ul></aside>' +
+          '<section class="sc-cmp-main">' +
+            '<div class="sc-cmp-bar">' +
+              '<label class="sc-check"><input type="checkbox" id="sc-cmp-diff"> Only differences</label>' +
+              '<label class="sc-check" title="Fields the clone doesn’t copy — created/modified dates, owner bookkeeping, IDs, status"><input type="checkbox" id="sc-cmp-sys"> Include fields the clone doesn’t copy</label>' +
+              '<span class="toolbar-spacer"></span>' +
+              '<span class="sc-cmp-summary" id="sc-cmp-summary"></span>' +
+            '</div>' +
+            '<div class="sc-cmp-table-wrap" id="sc-cmp-wrap"><div class="state-msg state-loading">Loading records from ' +
+              esc([source].concat(targets).map(function (t) { return t.name; }).join(', ')) + '…</div></div>' +
+          '</section>' +
+        '</div>' +
+      '</div>' +
+      '<div class="sc-dialog-actions"><button type="button" class="btn btn--primary" data-dlg="close">Close</button></div>',
+      'xl'
+    );
+    dlg.el.querySelector('[data-dlg="close"]').addEventListener('click', dlg.close);
+    const listEl = dlg.el.querySelector('#sc-cmp-records');
+    const wrap = dlg.el.querySelector('#sc-cmp-wrap');
+    const summaryEl = dlg.el.querySelector('#sc-cmp-summary');
+    const diffOnly = dlg.el.querySelector('#sc-cmp-diff');
+    const withSys = dlg.el.querySelector('#sc-cmp-sys');
+
+    let srcRecs = null;
+    const tgt = new Map();
+    let current = rows[0].id;
+
+    function fields() {
+      const list = meta.attrs.filter(function (a) {
+        if (a.name === meta.primaryId) return false;
+        return withSys.checked || a.cloned;
+      });
+      const pn = list.findIndex(function (a) { return a.name === meta.primaryName; });
+      if (pn > 0) list.unshift(list.splice(pn, 1)[0]);
+      return list;
+    }
+
+    function recOf(map, id) { return map ? map.get(String(id).toLowerCase()) : null; }
+
+    function summaryFor(rowId, t, fl) {
+      const res = tgt.get(t.origin);
+      if (!res || res.error) return { kind: 'err' };
+      const s = recOf(srcRecs, rowId), r = recOf(res.recs, rowId);
+      if (!s) return { kind: 'err' };
+      if (!r) return { kind: 'new' };
+      const diffs = fl.filter(function (a) { return rawValue(a, s) !== rawValue(a, r); }).length;
+      return { kind: diffs ? 'diff' : 'same', diffs: diffs };
+    }
+
+    function chip(sm) {
+      if (sm.kind === 'new') return '<span class="sc-chip sc-chip--new">Not there yet</span>';
+      if (sm.kind === 'same') return '<span class="sc-chip sc-chip--ok">Identical</span>';
+      if (sm.kind === 'diff') return '<span class="sc-chip sc-chip--warn">' + sm.diffs + (sm.diffs === 1 ? ' difference' : ' differences') + '</span>';
+      return '<span class="sc-chip sc-chip--err">Unavailable</span>';
+    }
+
+    function renderList(fl) {
+      listEl.innerHTML = rows.map(function (r) {
+        return (
+          '<li data-id="' + esc(r.id) + '"' + (r.id === current ? ' class="active"' : '') + '>' +
+            '<div class="sc-cmp-rname">' + esc(r.name) + '</div>' +
+            '<div class="sc-cmp-chips">' + targets.map(function (t) {
+              return '<span class="sc-cmp-chiprow"><span>' + esc(t.name) + '</span>' + chip(summaryFor(r.id, t, fl)) + '</span>';
+            }).join('') + '</div>' +
+          '</li>'
+        );
+      }).join('');
+    }
+
+    function valueCell(text, cls, extra) {
+      return '<td class="' + cls + '"><div class="sc-cmp-val' + (text ? '' : ' sc-cmp-blank') + '"' +
+        (text.length > 80 ? ' title="' + esc(text.slice(0, 1000)) + '"' : '') + '>' + (text ? esc(text) : 'blank') + '</div>' + (extra || '') + '</td>';
+    }
+
+    function renderTable() {
+      const fl = fields();
+      renderList(fl);
+      const s = recOf(srcRecs, current);
+      if (!s) {
+        wrap.innerHTML = '<div class="state-msg state-error">This record could not be read from ' + esc(source.name) + '.</div>';
+        summaryEl.textContent = '';
+        return;
+      }
+      const tRecs = targets.map(function (t) {
+        const res = tgt.get(t.origin);
+        return { t: t, error: res && res.error, rec: res && !res.error ? recOf(res.recs, current) : null };
+      });
+      let diffRows = 0;
+      const body = fl.map(function (a) {
+        const sv = rawValue(a, s);
+        let anyDiff = false;
+        const cells = tRecs.map(function (x, i) {
+          if (x.error) return '<td class="sc-cmp-na">—</td>';
+          if (!x.rec) return '<td class="sc-cmp-na">—</td>';
+          const same = rawValue(a, x.rec) === sv;
+          if (!same) anyDiff = true;
+          return valueCell(shownValue(a, x.rec), same ? 'sc-cmp-same' : 'sc-cmp-diff',
+            same
+              ? '<span class="sc-cmp-flag sc-cmp-flag--same">✓ Match</span>'
+              : '<span class="sc-cmp-flag">≠ Different</span><button type="button" class="sc-link-btn" data-diff="' + esc(a.name) + '" data-t="' + i + '">View differences</button>');
+        });
+        if (anyDiff) diffRows++;
+        if (diffOnly.checked && !anyDiff) return '';
+        return (
+          '<tr' + (anyDiff ? ' class="sc-cmp-row-diff"' : '') + '>' +
+            '<th scope="row"><div class="sc-cmp-fname">' + esc(a.label) + '</div><div class="sc-cmp-fsub">' + esc(a.name) + '</div></th>' +
+            valueCell(shownValue(a, s), 'sc-cmp-src') +
+            cells.join('') +
+          '</tr>'
+        );
+      }).join('');
+
+      wrap.innerHTML =
+        '<table class="sc-cmp-table">' +
+          '<colgroup><col style="width:190px"><col>' + targets.map(function () { return '<col>'; }).join('') + '</colgroup>' +
+          '<thead><tr><th>Field</th><th>' + esc(source.name) + ' <span class="sc-cmp-tag">source</span></th>' +
+            tRecs.map(function (x) {
+              const sub = x.error ? '<span class="sc-chip sc-chip--err" title="' + esc(x.error) + '">Couldn’t read</span>'
+                : !x.rec ? '<span class="sc-chip sc-chip--new" title="This record doesn’t exist in ' + esc(x.t.name) + ' yet — cloning creates it">Not there yet</span>' : '';
+              return '<th>' + esc(x.t.name) + (sub ? '<div class="sc-cmp-thsub">' + sub + '</div>' : '') + '</th>';
+            }).join('') +
+          '</tr></thead>' +
+          '<tbody>' + (body || '<tr><td colspan="' + (targets.length + 2) + '" class="sc-cmp-empty">No differences in these fields.</td></tr>') + '</tbody>' +
+        '</table>';
+      summaryEl.textContent = fl.length + ' fields · ' + diffRows + ' with differences';
+    }
+
+    listEl.addEventListener('click', function (e) {
+      const li = e.target.closest('li[data-id]');
+      if (!li || li.dataset.id === current) return;
+      current = li.dataset.id;
+      renderTable();
+    });
+    diffOnly.addEventListener('change', function () { if (srcRecs) renderTable(); });
+    withSys.addEventListener('change', function () { if (srcRecs) renderTable(); });
+    wrap.addEventListener('click', function (e) {
+      const b = e.target.closest('[data-diff]');
+      if (!b) return;
+      const a = meta.attrByName.get(b.dataset.diff);
+      const t = targets[Number(b.dataset.t)];
+      const s = recOf(srcRecs, current);
+      const r = recOf(tgt.get(t.origin).recs, current);
+      const rowName = (rows.filter(function (x) { return x.id === current; })[0] || {}).name || '';
+      openDiffDialog(a.label + ' — ' + rowName, source.name, diffText(a, s), t.name, diffText(a, r));
+    });
+
+    const ids = rows.map(function (r) { return r.id; });
+    Promise.all([
+      fetchFullRecords('', meta, ids).then(function (m) { srcRecs = m; }),
+    ].concat(targets.map(function (t) {
+      return fetchFullRecords(t.url, meta, ids).then(
+        function (m) { tgt.set(t.origin, { recs: m }); },
+        function (err) { tgt.set(t.origin, { error: err.message }); }
+      );
+    }))).then(renderTable, function (err) {
+      wrap.innerHTML = '<div class="state-msg state-error">Couldn’t load the records from ' + esc(source.name) + ': ' + esc(err.message) + '</div>';
+    });
+  }
+
+  function prettyJson(text) {
+    const t = text.trim();
+    if (!/^[\[{]/.test(t)) return null;
+    try { return JSON.parse(t); } catch (_) { return null; }
+  }
+
+  function sameJson(x, y) {
+    if (x === y) return true;
+    if (typeof x !== typeof y || x === null || y === null || typeof x !== 'object') return false;
+    if (Array.isArray(x) !== Array.isArray(y)) return false;
+    const kx = Object.keys(x), ky = Object.keys(y);
+    if (kx.length !== ky.length) return false;
+    return kx.every(function (k) { return Object.prototype.hasOwnProperty.call(y, k) && sameJson(x[k], y[k]); });
+  }
+
+  function lineOps(a, b) {
+    const n = a.length, m = b.length;
+    if (n * m > 4000000) {
+      return a.map(function (l) { return { op: 'del', a: l }; }).concat(b.map(function (l) { return { op: 'add', b: l }; }));
+    }
+    const w = m + 1;
+    const dp = new Uint32Array((n + 1) * w);
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i * w + j] = a[i] === b[j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+      }
+    }
+    const ops = [];
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) { ops.push({ op: 'same', a: a[i], b: b[j] }); i++; j++; }
+      else if (dp[(i + 1) * w + j] >= dp[i * w + j + 1]) { ops.push({ op: 'del', a: a[i] }); i++; }
+      else { ops.push({ op: 'add', b: b[j] }); j++; }
+    }
+    while (i < n) ops.push({ op: 'del', a: a[i++] });
+    while (j < m) ops.push({ op: 'add', b: b[j++] });
+    return ops;
+  }
+
+  function pairRows(ops) {
+    const rows = [];
+    let k = 0;
+    while (k < ops.length) {
+      if (ops[k].op === 'same') { rows.push({ kind: 'same', a: ops[k].a, b: ops[k].b }); k++; continue; }
+      const dels = [], adds = [];
+      while (k < ops.length && ops[k].op !== 'same') {
+        if (ops[k].op === 'del') dels.push(ops[k].a); else adds.push(ops[k].b);
+        k++;
+      }
+      for (let i = 0; i < Math.max(dels.length, adds.length); i++) {
+        rows.push({ kind: 'chg', a: i < dels.length ? dels[i] : null, b: i < adds.length ? adds[i] : null });
+      }
+    }
+    return rows;
+  }
+
+  function charHighlight(a, b) {
+    let p = 0;
+    while (p < a.length && p < b.length && a[p] === b[p]) p++;
+    let s = 0;
+    while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+    const mark = function (str) {
+      const mid = str.slice(p, str.length - s);
+      return esc(str.slice(0, p)) + (mid ? '<mark>' + esc(mid) + '</mark>' : '') + esc(str.slice(str.length - s));
+    };
+    return { a: mark(a), b: mark(b) };
+  }
+
+  function openDiffDialog(title, leftName, leftText, rightName, rightText) {
+    let left = leftText, right = rightText, note = '';
+    const lj = prettyJson(leftText), rj = prettyJson(rightText);
+    if (lj && rj) {
+      left = JSON.stringify(lj, null, 2);
+      right = JSON.stringify(rj, null, 2);
+      note = sameJson(lj, rj)
+        ? 'Same JSON data — only formatting or whitespace differs.'
+        : 'Both values are JSON, shown formatted.';
+    }
+    const ops = pairRows(lineOps(left.split(/\r?\n/), right.split(/\r?\n/)));
+    let la = 0, lb = 0, changed = 0;
+    const body = ops.map(function (r) {
+      const hasA = r.a !== null && r.a !== undefined, hasB = r.b !== null && r.b !== undefined;
+      if (hasA) la++;
+      if (hasB) lb++;
+      if (r.kind === 'same') {
+        return '<tr><td class="sc-df-ln">' + la + '</td><td class="sc-df-code">' + esc(r.a) + '</td>' +
+          '<td class="sc-df-ln">' + lb + '</td><td class="sc-df-code">' + esc(r.b) + '</td></tr>';
+      }
+      changed++;
+      const h = hasA && hasB ? charHighlight(r.a, r.b) : { a: hasA ? esc(r.a) : '', b: hasB ? esc(r.b) : '' };
+      return (
+        '<tr>' +
+          '<td class="sc-df-ln">' + (hasA ? la : '') + '</td><td class="sc-df-code ' + (hasA ? 'sc-df-del' : 'sc-df-gap') + '">' + h.a + '</td>' +
+          '<td class="sc-df-ln">' + (hasB ? lb : '') + '</td><td class="sc-df-code ' + (hasB ? 'sc-df-add' : 'sc-df-gap') + '">' + h.b + '</td>' +
+        '</tr>'
+      );
+    }).join('');
+    const dlg = showDialog(
+      '<div class="sc-dialog-title">' + esc(title) + '</div>' +
+      '<div class="sc-dialog-body sc-df-body">' +
+        (note ? '<div class="sc-status sc-df-note">' + esc(note) + '</div>' : '') +
+        '<div class="sc-df-wrap"><table class="sc-df">' +
+          '<colgroup><col class="sc-df-lncol"><col><col class="sc-df-lncol"><col></colgroup>' +
+          '<thead><tr><th colspan="2">' + esc(leftName) + ' <span class="sc-cmp-tag">source</span></th><th colspan="2">' + esc(rightName) + '</th></tr></thead>' +
+          '<tbody>' + body + '</tbody>' +
+        '</table></div>' +
+      '</div>' +
+      '<div class="sc-dialog-actions">' +
+        '<span class="sc-df-count">' + changed + (changed === 1 ? ' changed line' : ' changed lines') + '</span>' +
+        '<span class="toolbar-spacer"></span>' +
+        '<button type="button" class="btn btn--primary" data-dlg="close">Close</button>' +
+      '</div>',
+      'xl'
+    );
+    dlg.el.querySelector('[data-dlg="close"]').addEventListener('click', dlg.close);
   }
 
   // ── Dialog helpers ─────────────────────────────────────────────────────
@@ -1254,7 +1736,11 @@
     const size = wide === 'xl' ? ' sc-dialog--xl' : wide ? ' sc-dialog--wide' : '';
     overlay.innerHTML = '<div class="sc-dialog' + size + '" role="dialog" aria-modal="true">' + html + '</div>';
     document.body.appendChild(overlay);
-    function onKey(e) { if (e.key === 'Escape') close(); }
+    function onKey(e) {
+      if (e.key !== 'Escape') return;
+      const all = document.querySelectorAll('.sc-overlay');
+      if (all[all.length - 1] === overlay) close();
+    }
     function close() { document.removeEventListener('keydown', onKey); overlay.remove(); }
     document.addEventListener('keydown', onKey);
     return { el: overlay, close: close };
