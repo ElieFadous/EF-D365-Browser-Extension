@@ -254,8 +254,42 @@ html, body {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
 }
 .pt-results-info.hidden { display: none; }
+.pt-results-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.pt-link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-light);
+  cursor: pointer;
+}
+.pt-link-btn:hover { text-decoration: underline; }
+
+.pt-pager { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.pt-pager__btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--primary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pt-pager__btn:hover:not(:disabled) { background: #eef2ff; border-color: #c7d2fe; }
+.pt-pager__btn:disabled { color: #b0b8c6; cursor: default; }
+.pt-pager__label { padding: 0 8px; font-weight: 600; color: var(--text); white-space: nowrap; }
 
 /* ── Log list ────────────────────────────────────────────────────────────────── */
 

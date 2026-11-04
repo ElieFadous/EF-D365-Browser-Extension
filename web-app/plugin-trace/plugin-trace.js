@@ -14,13 +14,22 @@ const ENV_NAME   = _params.get('name')  ?? ENV_URL;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-let _allLogs       = [];          // full page of results from the API
-let _filteredLogs  = [];          // after client-side text search
+const PAGE_SIZE = 100;
+
 let _openLogId     = null;        // currently expanded row
 let _entitySetName = null;        // resolved via EntityDefinitions on first fetch
 let _showFilter    = 'all'; // 'all' | 'exceptions'
 let _ignoredTypes  = new Set();   // short plugin type names excluded from results
-let _fetchingMore  = false;       // true while paginating (more pages still in flight)
+let _pages         = [];
+let _nextLinks     = [];
+let _pageIndex     = 0;
+let _totalCount    = null;
+let _countCapped   = false;
+let _firstUrl      = null;
+let _queryToken    = 0;
+let _searchTimer   = null;
+let _loadingPage   = false;
+let _fetchedAt     = null;
 
 // ─── Ignored types ────────────────────────────────────────────────────────────
 
@@ -37,7 +46,7 @@ function _saveIgnoredTypes() {
 async function _ignoreType(shortName) {
   _ignoredTypes.add(shortName);
   await _saveIgnoredTypes();
-  _applyClientFilter();
+  _fetchLogs();
 }
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
@@ -58,8 +67,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     _fetchLogs();
   });
 
-  // Live client-side search as the user types.
-  document.getElementById('search').addEventListener('input', _applyClientFilter);
+  document.getElementById('search').addEventListener('input', () => {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => _fetchLogs(), 400);
+  });
+  document.getElementById('search').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { clearTimeout(_searchTimer); _fetchLogs(); }
+  });
 
   // All / Exceptions segmented control.
   document.querySelectorAll('.pt-seg__btn').forEach(btn => {
@@ -67,7 +81,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.querySelectorAll('.pt-seg__btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       _showFilter = btn.dataset.filter;
-      _applyClientFilter();
+      _fetchLogs();
     });
   });
 
@@ -76,6 +90,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById(id).addEventListener('keydown', e => {
       if (e.key === 'Enter') _fetchLogs();
     });
+  });
+
+  document.getElementById('results-text').addEventListener('click', async e => {
+    if (!e.target.closest('[data-unignore]')) return;
+    _ignoredTypes.clear();
+    await _saveIgnoredTypes();
+    _fetchLogs();
+  });
+
+  document.getElementById('pager').addEventListener('click', e => {
+    const btn = e.target.closest('[data-page]');
+    if (!btn || btn.disabled) return;
+    const to = btn.dataset.page === 'first' ? 0
+      : btn.dataset.page === 'prev' ? _pageIndex - 1
+      : _pageIndex + 1;
+    _loadPage(to);
   });
 
   if (!ENV_URL) {
@@ -108,7 +138,7 @@ function _bridgeFetch(url, extraHeaders = {}, method = 'GET', body = null) {
       clearTimeout(timer);
       window.removeEventListener('message', onMsg);
       if (e.data.ok) resolve(e.data.data);
-      else reject(new Error(e.data.error || 'HTTP ' + e.data.status));
+      else reject(new Error(e.data.error || (e.data.data && e.data.data.error && e.data.data.error.message) || 'HTTP ' + e.data.status));
     }
     window.addEventListener('message', onMsg);
     // window.opener when popped out to its own tab; window.parent when embedded.
@@ -140,133 +170,178 @@ async function _resolveEntitySetName() {
   return _entitySetName;
 }
 
-// ─── Fetch (with full pagination) ────────────────────────────────────────────
+// ─── Fetch (server-side paging) ──────────────────────────────────────────────
 
-async function _fetchLogs() {
-  _showLoading(_entitySetName ? 'Fetching plug-in trace logs…' : 'Resolving entity metadata…');
-
-  try {
-    const entitySet = await _resolveEntitySetName();
-
-    _showLoading('Fetching plug-in trace logs…');
-
-    const rawFrom = document.getElementById('filter-from').value;
-    const rawTo   = document.getElementById('filter-to').value;
-    const filters = [];
-    if (rawFrom) filters.push(`createdon ge ${new Date(rawFrom).toISOString()}`);
-    if (rawTo)   filters.push(`createdon le ${new Date(rawTo).toISOString()}`);
-
-    const filterStr = filters.length
-      ? `&$filter=${encodeURIComponent(filters.join(' and '))}`
-      : '';
-
-    // No $top — follow @odata.nextLink until all pages are retrieved.
-    const firstUrl = (
-      `${ENV_URL}/api/data/v9.2/${entitySet}` +
-      `?$select=plugintracelogid,typename,messagename,createdon,mode,depth` +
-      `,exceptiondetails,messageblock,performanceexecutionduration,correlationid,requestid` +
-      `&$orderby=createdon%20desc` +
-      filterStr
-    );
-
-    // Reset state; pages are streamed progressively into _allLogs.
-    _allLogs      = [];
-    _openLogId    = null;
-    _fetchingMore = true;
-
-    await _fetchAllPages(firstUrl, (pageRecords) => {
-      _allLogs.push(...pageRecords);
-      _applyClientFilter();  // render after each page so user sees results immediately
-    });
-  } catch (e) {
-    _fetchingMore = false;
-    _showError(e.message);
-    return;
-  }
-  _fetchingMore = false;
-  _applyClientFilter();  // final render to clear "loading more…" indicator
+function _odataString(s) {
+  return `'${String(s).replace(/'/g, "''")}'`;
 }
 
-/**
- * Follows @odata.nextLink pagination, calling onPage(records) after each page
- * so the caller can render results progressively.
- * Uses odata.maxpagesize=500 for a responsive first-paint.
- *
- * @param {string}   firstUrl - Initial OData request URL.
- * @param {Function} onPage   - Called with each page's record array as it arrives.
- */
-async function _fetchAllPages(firstUrl, onPage) {
-  let nextUrl = firstUrl;
+function _buildQueryUrl(entitySet) {
+  const filters = [];
+  const rawFrom = document.getElementById('filter-from').value;
+  const rawTo   = document.getElementById('filter-to').value;
+  if (rawFrom) filters.push(`createdon ge ${new Date(rawFrom).toISOString()}`);
+  if (rawTo)   filters.push(`createdon le ${new Date(rawTo).toISOString()}`);
+  if (_showFilter === 'exceptions') filters.push('exceptiondetails ne null');
 
-  while (nextUrl) {
-    const data = await _d365Fetch(nextUrl, { 'Prefer': 'odata.maxpagesize=500' });
-    onPage(data.value ?? []);
-    nextUrl = data['@odata.nextLink'] ?? null;
+  const q = document.getElementById('search').value.trim();
+  if (q) {
+    const v = _odataString(q);
+    filters.push(`(contains(typename,${v}) or contains(messagename,${v}) or contains(exceptiondetails,${v}))`);
   }
-}
-
-// ─── Client-side search filter ────────────────────────────────────────────────
-
-function _applyClientFilter() {
-  const q = document.getElementById('search').value.trim().toLowerCase();
-
-  _filteredLogs = _allLogs.filter(log => {
-    if (_showFilter === 'exceptions' && !log.exceptiondetails) return false;
-    if (_ignoredTypes.has(_shortName(log.typename ?? ''))) return false;
-    if (!q) return true;
-    return (
-      (log.typename         ?? '').toLowerCase().includes(q) ||
-      (log.messagename      ?? '').toLowerCase().includes(q) ||
-      (log.exceptiondetails ?? '').toLowerCase().includes(q)
-    );
+  _ignoredTypes.forEach(name => {
+    filters.push(`typename ne ${_odataString(name)} and not startswith(typename,${_odataString(name + ',')})`);
   });
 
+  return (
+    `${ENV_URL}/api/data/v9.2/${entitySet}` +
+    `?$select=plugintracelogid,typename,messagename,createdon,mode,depth` +
+    `,exceptiondetails,messageblock,performanceexecutionduration,correlationid,requestid` +
+    `&$count=true` +
+    `&$orderby=${encodeURIComponent('createdon desc,plugintracelogid desc')}` +
+    (filters.length ? `&$filter=${encodeURIComponent(filters.join(' and '))}` : '')
+  );
+}
+
+async function _fetchLogs() {
+  const token = ++_queryToken;
+  clearTimeout(_searchTimer);
+  _showLoading(_entitySetName ? 'Fetching plug-in trace logs…' : 'Resolving entity metadata…');
+
+  let entitySet;
+  try {
+    entitySet = await _resolveEntitySetName();
+  } catch (e) {
+    if (token === _queryToken) _showError(e.message);
+    return;
+  }
+  if (token !== _queryToken) return;
+
+  _firstUrl    = _buildQueryUrl(entitySet);
+  _pages       = [];
+  _nextLinks   = [];
+  _pageIndex   = 0;
+  _totalCount  = null;
+  _countCapped = false;
+  _openLogId   = null;
+  _loadingPage = false;
+  await _loadPage(0, token);
+}
+
+async function _loadPage(index, token = _queryToken) {
+  if (index < 0 || _loadingPage) return;
+  if (_pages[index]) {
+    _pageIndex = index;
+    _renderLogs();
+    return;
+  }
+  const url = index === 0 ? _firstUrl : _nextLinks[index - 1];
+  if (!url) return;
+
+  _loadingPage = true;
+  if (index === 0) _showLoading('Fetching plug-in trace logs…');
+  else _renderPager(true);
+
+  let data;
+  try {
+    data = await _d365Fetch(url, { 'Prefer': `odata.maxpagesize=${PAGE_SIZE},odata.include-annotations="*"` });
+  } catch (e) {
+    if (token !== _queryToken) return;
+    _loadingPage = false;
+    if (index === 0) _showError(e.message);
+    else { _renderPager(false); _showPagerError(e.message); }
+    return;
+  }
+  if (token !== _queryToken) return;
+  _loadingPage = false;
+
+  if (index === 0) {
+    _totalCount  = typeof data['@odata.count'] === 'number' ? data['@odata.count'] : null;
+    _countCapped = data['@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded'] === true;
+  }
+  _pages[index]     = (data.value ?? []).slice(0, PAGE_SIZE);
+  _nextLinks[index] = data['@odata.nextLink'] ?? null;
+  _pageIndex        = index;
+  _fetchedAt        = new Date();
   _renderLogs();
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
 
+function _pageCountText() {
+  if (_totalCount == null) return null;
+  const pages = Math.max(1, Math.ceil(_totalCount / PAGE_SIZE));
+  return _countCapped ? `${pages}+` : String(pages);
+}
+
+function _renderPager(busy) {
+  const pager = document.getElementById('pager');
+  const has   = _pages[_pageIndex] !== undefined;
+  const of    = _pageCountText();
+  pager.innerHTML = `
+    <button class="pt-pager__btn" data-page="first" title="First page" ${busy || _pageIndex === 0 ? 'disabled' : ''}>&laquo;</button>
+    <button class="pt-pager__btn" data-page="prev" title="Previous page" ${busy || _pageIndex === 0 ? 'disabled' : ''}>&lsaquo; Prev</button>
+    <span class="pt-pager__label">${busy ? 'Loading…' : `Page ${_pageIndex + 1}${of ? ` of ${of}` : ''}`}</span>
+    <button class="pt-pager__btn" data-page="next" title="Next page" ${busy || !has || !_nextLinks[_pageIndex] ? 'disabled' : ''}>Next &rsaquo;</button>
+  `;
+  pager.classList.toggle('hidden', !busy && _pageIndex === 0 && !_nextLinks[0]);
+}
+
+function _showPagerError(msg) {
+  document.getElementById('results-text').textContent = `Could not load the next page: ${msg}`;
+}
+
 function _renderLogs() {
   const container = document.getElementById('log-list');
   const info      = document.getElementById('results-info');
+  const text      = document.getElementById('results-text');
+  const logs      = _pages[_pageIndex] ?? [];
+  const filtered  = _showFilter === 'exceptions' || document.getElementById('search').value.trim() || _ignoredTypes.size;
 
-  // While the very first page hasn't arrived yet, leave the spinner visible.
-  if (_allLogs.length === 0 && _fetchingMore) return;
-
-  if (_filteredLogs.length === 0) {
+  if (logs.length === 0) {
     info.classList.add('hidden');
     container.innerHTML = `<div class="pt-empty">${
-      _allLogs.length === 0
-        ? 'No plug-in trace logs found. Adjust the date range or check that trace logging is enabled in this environment.'
-        : 'No logs match the current search.'
+      filtered
+        ? 'No logs match the current search and filters.'
+        : 'No plug-in trace logs found. Adjust the date range or check that trace logging is enabled in this environment.'
     }</div>`;
     return;
   }
 
-  const total     = _allLogs.length;
-  const shown     = _filteredLogs.length;
-  const fetchedAt = _fmtDateTime(new Date().toISOString());
-  const suffix    = _fetchingMore
-    ? ' — loading more…'
-    : ` · fetched ${fetchedAt}`;
-  info.textContent = shown === total
-    ? `${total} log${total !== 1 ? 's' : ''}${suffix}`
-    : `${shown} of ${total} logs (filtered)${suffix}`;
+  const from  = _pageIndex * PAGE_SIZE + 1;
+  const to    = from + logs.length - 1;
+  const total = _totalCount == null ? null : `${_totalCount.toLocaleString()}${_countCapped ? '+' : ''}`;
+  const ignored = [..._ignoredTypes].sort().join('\n');
+  text.innerHTML = _esc(
+    `${from.toLocaleString()}–${to.toLocaleString()}${total ? ` of ${total}` : ''} log${total === '1' ? '' : 's'}` +
+    `${filtered ? ' (filtered)' : ''}`
+  ) +
+    (_ignoredTypes.size
+      ? ` · <span title="${_esc(ignored)}">${_ignoredTypes.size} plugin type${_ignoredTypes.size === 1 ? '' : 's'} ignored</span> ` +
+        `<button type="button" class="pt-link-btn" data-unignore>Show all</button>`
+      : '') +
+    _esc(` · fetched ${_fmtDateTime(_fetchedAt.toISOString())}`);
   info.classList.remove('hidden');
+  _renderPager(false);
 
-  container.innerHTML = '';
-  _filteredLogs.forEach(log => container.appendChild(_buildRow(log)));
+  const frag = document.createDocumentFragment();
+  logs.forEach(log => frag.appendChild(_buildRow(log)));
+  container.replaceChildren(frag);
+  container.scrollTop = 0;
 
-  // Restore previously expanded row if still in the filtered set.
   if (_openLogId) {
     const row = container.querySelector(`[data-id="${CSS.escape(_openLogId)}"]`);
-    if (row) row.classList.add('expanded');
+    if (row) _expandRow(row, logs.find(l => l.plugintracelogid === _openLogId));
   }
+}
+
+function _expandRow(row, log) {
+  if (!row.querySelector('.pt-log-detail')) row.appendChild(_buildDetail(log));
+  row.classList.add('expanded');
 }
 
 function _buildRow(log) {
   const hasException = !!log.exceptiondetails;
-  const hasTrace     = !!log.messageblock;
   const isSync       = log.mode === 0;
   const modeLabel    = isSync ? 'Sync' : log.mode === 1 ? 'Async' : `Mode ${log.mode}`;
   const modeClass    = isSync ? 'pt-badge--sync' : 'pt-badge--async';
@@ -294,6 +369,37 @@ function _buildRow(log) {
     </div>
     <span class="pt-log-chevron">&#8250;</span>
   `;
+
+  // Toggle expand on summary click.
+  summary.addEventListener('click', () => {
+    const isOpen = row.classList.contains('expanded');
+    document.querySelectorAll('.pt-log-row.expanded').forEach(r => r.classList.remove('expanded'));
+    if (!isOpen) {
+      _expandRow(row, log);
+      _openLogId = log.plugintracelogid;
+    } else {
+      _openLogId = null;
+    }
+  });
+
+  // Right-click context menu.
+  summary.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    _showContextMenu(e.clientX, e.clientY, _shortName(log.typename ?? ''));
+  });
+
+  row.appendChild(summary);
+  return row;
+}
+
+function _buildDetail(log) {
+  const hasException = !!log.exceptiondetails;
+  const hasTrace     = !!log.messageblock;
+  const isSync       = log.mode === 0;
+  const modeLabel    = isSync ? 'Sync' : log.mode === 1 ? 'Async' : `Mode ${log.mode}`;
+  const duration     = log.performanceexecutionduration != null
+    ? `${log.performanceexecutionduration} ms`
+    : '—';
 
   // ── Detail panel ──
   const detail = document.createElement('div');
@@ -352,27 +458,7 @@ function _buildRow(log) {
   metaSection.appendChild(grid);
   detail.appendChild(metaSection);
 
-  // Toggle expand on summary click.
-  summary.addEventListener('click', () => {
-    const isOpen = row.classList.contains('expanded');
-    document.querySelectorAll('.pt-log-row.expanded').forEach(r => r.classList.remove('expanded'));
-    if (!isOpen) {
-      row.classList.add('expanded');
-      _openLogId = log.plugintracelogid;
-    } else {
-      _openLogId = null;
-    }
-  });
-
-  // Right-click context menu.
-  summary.addEventListener('contextmenu', e => {
-    e.preventDefault();
-    _showContextMenu(e.clientX, e.clientY, _shortName(log.typename ?? ''));
-  });
-
-  row.appendChild(summary);
-  row.appendChild(detail);
-  return row;
+  return detail;
 }
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
