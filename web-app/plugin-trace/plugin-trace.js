@@ -21,11 +21,11 @@ let _entitySetName = null;        // resolved via EntityDefinitions on first fet
 let _showFilter    = 'all'; // 'all' | 'exceptions'
 let _ignoredTypes  = new Set();   // short plugin type names excluded from results
 let _pages         = [];
-let _nextLinks     = [];
+let _moreAfter     = [];
 let _pageIndex     = 0;
 let _totalCount    = null;
-let _countCapped   = false;
-let _firstUrl      = null;
+let _countState    = null;
+let _filterXml     = '';
 let _queryToken    = 0;
 let _searchTimer   = null;
 let _loadingPage   = false;
@@ -104,8 +104,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!btn || btn.disabled) return;
     const to = btn.dataset.page === 'first' ? 0
       : btn.dataset.page === 'prev' ? _pageIndex - 1
+      : btn.dataset.page === 'last' ? _lastPageIndex()
       : _pageIndex + 1;
-    _loadPage(to);
+    if (to != null) _loadPage(to);
+  });
+  document.getElementById('pager').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.matches('.pt-pager__input')) _goToTypedPage(e.target);
+  });
+  document.getElementById('pager').addEventListener('change', e => {
+    if (e.target.matches('.pt-pager__input')) _goToTypedPage(e.target);
   });
 
   if (!ENV_URL) {
@@ -172,34 +179,68 @@ async function _resolveEntitySetName() {
 
 // ─── Fetch (server-side paging) ──────────────────────────────────────────────
 
-function _odataString(s) {
-  return `'${String(s).replace(/'/g, "''")}'`;
+const _ATTRS = [
+  'plugintracelogid', 'typename', 'messagename', 'createdon', 'mode', 'depth', 'exceptiondetails',
+  'messageblock', 'performanceexecutionduration', 'correlationid', 'requestid',
+];
+
+function _xml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function _buildQueryUrl(entitySet) {
-  const filters = [];
+function _likeEscape(s) {
+  return String(s).replace(/[[%_]/g, '[$&]');
+}
+
+function _cond(attr, op, value) {
+  return `<condition attribute="${attr}" operator="${op}" value="${_xml(value)}"/>`;
+}
+
+function _buildFilterXml() {
+  const parts = [];
   const rawFrom = document.getElementById('filter-from').value;
   const rawTo   = document.getElementById('filter-to').value;
-  if (rawFrom) filters.push(`createdon ge ${new Date(rawFrom).toISOString()}`);
-  if (rawTo)   filters.push(`createdon le ${new Date(rawTo).toISOString()}`);
-  if (_showFilter === 'exceptions') filters.push('exceptiondetails ne null');
+  if (rawFrom) parts.push(_cond('createdon', 'ge', new Date(rawFrom).toISOString()));
+  if (rawTo)   parts.push(_cond('createdon', 'le', new Date(rawTo).toISOString()));
+  if (_showFilter === 'exceptions') parts.push(_cond('exceptiondetails', 'like', '_%'));
 
   const q = document.getElementById('search').value.trim();
   if (q) {
-    const v = _odataString(q);
-    filters.push(`(contains(typename,${v}) or contains(messagename,${v}) or contains(exceptiondetails,${v}))`);
+    const v = `%${_likeEscape(q)}%`;
+    parts.push(`<filter type="or">${['typename', 'messagename', 'exceptiondetails'].map(attr => _cond(attr, 'like', v)).join('')}</filter>`);
   }
   _ignoredTypes.forEach(name => {
-    filters.push(`typename ne ${_odataString(name)} and not startswith(typename,${_odataString(name + ',')})`);
+    parts.push(_cond('typename', 'ne', name));
+    parts.push(_cond('typename', 'not-like', `${_likeEscape(name)},%`));
   });
+  return parts.length ? `<filter type="and">${parts.join('')}</filter>` : '';
+}
 
-  return (
-    `${ENV_URL}/api/data/v9.2/${entitySet}` +
-    `?$select=plugintracelogid,typename,messagename,createdon,mode,depth` +
-    `,exceptiondetails,messageblock,performanceexecutionduration,correlationid,requestid` +
-    `&$count=true` +
-    `&$orderby=${encodeURIComponent('createdon desc,plugintracelogid desc')}` +
-    (filters.length ? `&$filter=${encodeURIComponent(filters.join(' and '))}` : '')
+function _fetchXmlUrl(xml) {
+  return `${ENV_URL}/api/data/v9.2/${_entitySetName}?fetchXml=${encodeURIComponent(xml)}`;
+}
+
+function _pageUrl(index) {
+  return _fetchXmlUrl(
+    `<fetch count="${PAGE_SIZE}" page="${index + 1}" returntotalrecordcount="true">` +
+      '<entity name="plugintracelog">' +
+        _ATTRS.map(attr => `<attribute name="${attr}"/>`).join('') +
+        '<order attribute="createdon" descending="true"/>' +
+        '<order attribute="plugintracelogid" descending="true"/>' +
+        _filterXml +
+      '</entity>' +
+    '</fetch>'
+  );
+}
+
+function _countUrl() {
+  return _fetchXmlUrl(
+    '<fetch aggregate="true">' +
+      '<entity name="plugintracelog">' +
+        '<attribute name="plugintracelogid" alias="n" aggregate="count"/>' +
+        _filterXml +
+      '</entity>' +
+    '</fetch>'
   );
 }
 
@@ -208,24 +249,54 @@ async function _fetchLogs() {
   clearTimeout(_searchTimer);
   _showLoading(_entitySetName ? 'Fetching plug-in trace logs…' : 'Resolving entity metadata…');
 
-  let entitySet;
   try {
-    entitySet = await _resolveEntitySetName();
+    await _resolveEntitySetName();
   } catch (e) {
     if (token === _queryToken) _showError(e.message);
     return;
   }
   if (token !== _queryToken) return;
 
-  _firstUrl    = _buildQueryUrl(entitySet);
+  _filterXml   = _buildFilterXml();
   _pages       = [];
-  _nextLinks   = [];
+  _moreAfter   = [];
   _pageIndex   = 0;
   _totalCount  = null;
-  _countCapped = false;
+  _countState  = null;
   _openLogId   = null;
   _loadingPage = false;
   await _loadPage(0, token);
+}
+
+async function _countAll(token) {
+  let n = null;
+  try {
+    const data = await _d365Fetch(_countUrl());
+    n = data.value && data.value[0] ? Number(data.value[0].n) : null;
+  } catch (e) {
+    console.warn('[EF PPT] Could not count all trace logs:', e);
+  }
+  if (token !== _queryToken) return;
+  if (n != null && !isNaN(n)) {
+    _totalCount = n;
+    _countState = 'exact';
+  } else {
+    _countState = 'capped';
+  }
+  _renderInfo();
+}
+
+function _lastPageIndex() {
+  return _countState === 'exact' ? Math.max(0, Math.ceil(_totalCount / PAGE_SIZE) - 1) : null;
+}
+
+function _goToTypedPage(input) {
+  const n = parseInt(input.value, 10);
+  const last = _lastPageIndex();
+  if (isNaN(n) || n < 1) { input.value = _pageIndex + 1; return; }
+  const to = last == null ? n - 1 : Math.min(n - 1, last);
+  if (to === _pageIndex) { input.value = _pageIndex + 1; return; }
+  _loadPage(to);
 }
 
 async function _loadPage(index, token = _queryToken) {
@@ -235,32 +306,44 @@ async function _loadPage(index, token = _queryToken) {
     _renderLogs();
     return;
   }
-  const url = index === 0 ? _firstUrl : _nextLinks[index - 1];
-  if (!url) return;
 
   _loadingPage = true;
-  if (index === 0) _showLoading('Fetching plug-in trace logs…');
+  if (index === 0 && !_pages.length) _showLoading('Fetching plug-in trace logs…');
   else _renderPager(true);
 
   let data;
   try {
-    data = await _d365Fetch(url, { 'Prefer': `odata.maxpagesize=${PAGE_SIZE},odata.include-annotations="*"` });
+    data = await _d365Fetch(_pageUrl(index), { 'Prefer': 'odata.include-annotations="*"' });
   } catch (e) {
     if (token !== _queryToken) return;
     _loadingPage = false;
-    if (index === 0) _showError(e.message);
+    if (!_pages.length) _showError(e.message);
     else { _renderPager(false); _showPagerError(e.message); }
     return;
   }
   if (token !== _queryToken) return;
   _loadingPage = false;
 
-  if (index === 0) {
-    _totalCount  = typeof data['@odata.count'] === 'number' ? data['@odata.count'] : null;
-    _countCapped = data['@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded'] === true;
+  const rows = (data.value ?? []).slice(0, PAGE_SIZE);
+  if (!rows.length && index > 0) {
+    _renderPager(false);
+    _showPagerError(`page ${index + 1} is empty`);
+    return;
   }
-  _pages[index]     = (data.value ?? []).slice(0, PAGE_SIZE);
-  _nextLinks[index] = data['@odata.nextLink'] ?? null;
+
+  if (_countState == null) {
+    const total = data['@Microsoft.Dynamics.CRM.totalrecordcount'];
+    if (data['@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded'] === true) {
+      _totalCount = typeof total === 'number' && total > 0 ? total : 5000;
+      _countState = 'counting';
+      _countAll(token);
+    } else if (typeof total === 'number' && total >= 0) {
+      _totalCount = total;
+      _countState = 'exact';
+    }
+  }
+  _pages[index]     = rows;
+  _moreAfter[index] = data['@Microsoft.Dynamics.CRM.morerecords'] === true;
   _pageIndex        = index;
   _fetchedAt        = new Date();
   _renderLogs();
@@ -271,30 +354,39 @@ async function _loadPage(index, token = _queryToken) {
 function _pageCountText() {
   if (_totalCount == null) return null;
   const pages = Math.max(1, Math.ceil(_totalCount / PAGE_SIZE));
-  return _countCapped ? `${pages}+` : String(pages);
+  return _countState === 'exact' ? pages.toLocaleString() : `${pages.toLocaleString()}+`;
+}
+
+function _hasNext() {
+  const last = _lastPageIndex();
+  return last != null ? _pageIndex < last : !!_moreAfter[_pageIndex];
 }
 
 function _renderPager(busy) {
   const pager = document.getElementById('pager');
-  const has   = _pages[_pageIndex] !== undefined;
   const of    = _pageCountText();
+  const last  = _lastPageIndex();
+  const atStart = _pageIndex === 0;
+  const lastTitle = last != null ? `Last page (${last + 1})`
+    : _countState === 'counting' ? 'Counting all logs — available in a moment'
+    : 'Too many logs to count — narrow the date range or filters';
   pager.innerHTML = `
-    <button class="pt-pager__btn" data-page="first" title="First page" ${busy || _pageIndex === 0 ? 'disabled' : ''}>&laquo;</button>
-    <button class="pt-pager__btn" data-page="prev" title="Previous page" ${busy || _pageIndex === 0 ? 'disabled' : ''}>&lsaquo; Prev</button>
-    <span class="pt-pager__label">${busy ? 'Loading…' : `Page ${_pageIndex + 1}${of ? ` of ${of}` : ''}`}</span>
-    <button class="pt-pager__btn" data-page="next" title="Next page" ${busy || !has || !_nextLinks[_pageIndex] ? 'disabled' : ''}>Next &rsaquo;</button>
+    <button class="pt-pager__btn" data-page="first" title="First page" ${busy || atStart ? 'disabled' : ''}>&laquo;</button>
+    <button class="pt-pager__btn" data-page="prev" title="Previous page" ${busy || atStart ? 'disabled' : ''}>&lsaquo; Prev</button>
+    <span class="pt-pager__label">${busy ? 'Loading…' : `Page <input type="number" class="pt-pager__input" min="1"${last != null ? ` max="${last + 1}"` : ''} value="${_pageIndex + 1}" aria-label="Page number" title="Type a page number and press Enter"> ${of ? `of ${of}` : ''}`}</span>
+    <button class="pt-pager__btn" data-page="next" title="Next page" ${busy || !_hasNext() ? 'disabled' : ''}>Next &rsaquo;</button>
+    <button class="pt-pager__btn" data-page="last" title="${_xml(lastTitle)}" ${busy || last == null || _pageIndex >= last ? 'disabled' : ''}>&raquo;</button>
   `;
-  pager.classList.toggle('hidden', !busy && _pageIndex === 0 && !_nextLinks[0]);
+  pager.classList.toggle('hidden', !busy && atStart && !_hasNext());
 }
 
 function _showPagerError(msg) {
-  document.getElementById('results-text').textContent = `Could not load the next page: ${msg}`;
+  document.getElementById('results-text').textContent = `Could not load that page: ${msg}`;
 }
 
 function _renderLogs() {
   const container = document.getElementById('log-list');
   const info      = document.getElementById('results-info');
-  const text      = document.getElementById('results-text');
   const logs      = _pages[_pageIndex] ?? [];
   const filtered  = _showFilter === 'exceptions' || document.getElementById('search').value.trim() || _ignoredTypes.size;
 
@@ -308,9 +400,29 @@ function _renderLogs() {
     return;
   }
 
+  _renderInfo();
+
+  const frag = document.createDocumentFragment();
+  logs.forEach(log => frag.appendChild(_buildRow(log)));
+  container.replaceChildren(frag);
+  container.scrollTop = 0;
+
+  if (_openLogId) {
+    const row = container.querySelector(`[data-id="${CSS.escape(_openLogId)}"]`);
+    if (row) _expandRow(row, logs.find(l => l.plugintracelogid === _openLogId));
+  }
+}
+
+function _renderInfo() {
+  const info     = document.getElementById('results-info');
+  const text     = document.getElementById('results-text');
+  const logs     = _pages[_pageIndex] ?? [];
+  if (!logs.length) return;
+  const filtered = _showFilter === 'exceptions' || document.getElementById('search').value.trim() || _ignoredTypes.size;
   const from  = _pageIndex * PAGE_SIZE + 1;
   const to    = from + logs.length - 1;
-  const total = _totalCount == null ? null : `${_totalCount.toLocaleString()}${_countCapped ? '+' : ''}`;
+  const total = _totalCount == null ? null
+    : `${_totalCount.toLocaleString()}${_countState === 'exact' ? '' : '+'}${_countState === 'counting' ? ' (counting…)' : ''}`;
   const ignored = [..._ignoredTypes].sort().join('\n');
   text.innerHTML = _esc(
     `${from.toLocaleString()}–${to.toLocaleString()}${total ? ` of ${total}` : ''} log${total === '1' ? '' : 's'}` +
@@ -322,17 +434,7 @@ function _renderLogs() {
       : '') +
     _esc(` · fetched ${_fmtDateTime(_fetchedAt.toISOString())}`);
   info.classList.remove('hidden');
-  _renderPager(false);
-
-  const frag = document.createDocumentFragment();
-  logs.forEach(log => frag.appendChild(_buildRow(log)));
-  container.replaceChildren(frag);
-  container.scrollTop = 0;
-
-  if (_openLogId) {
-    const row = container.querySelector(`[data-id="${CSS.escape(_openLogId)}"]`);
-    if (row) _expandRow(row, logs.find(l => l.plugintracelogid === _openLogId));
-  }
+  _renderPager(_loadingPage);
 }
 
 function _expandRow(row, log) {

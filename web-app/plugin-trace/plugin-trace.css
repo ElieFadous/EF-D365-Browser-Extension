@@ -289,7 +289,24 @@ html, body {
 }
 .pt-pager__btn:hover:not(:disabled) { background: #eef2ff; border-color: #c7d2fe; }
 .pt-pager__btn:disabled { color: #b0b8c6; cursor: default; }
-.pt-pager__label { padding: 0 8px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.pt-pager__label { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.pt-pager__input {
+  width: 56px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text);
+  background: var(--card);
+  outline: none;
+  -moz-appearance: textfield;
+}
+.pt-pager__input::-webkit-outer-spin-button,
+.pt-pager__input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pt-pager__input:focus { border-color: var(--primary-light); box-shadow: 0 0 0 3px rgba(40,85,160,0.12); }
 
 /* ── Log list ────────────────────────────────────────────────────────────────── */
 
