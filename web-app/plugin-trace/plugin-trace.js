@@ -636,8 +636,24 @@ function _periodText() {
   return _sumPeriod === '1' ? 'last 24 hours' : `last ${_sumPeriod} days`;
 }
 
+let _sumWindow = null;
+
 function _sumFrom() {
-  return new Date(Date.now() - Number(_sumPeriod) * 86_400_000).toISOString();
+  return _sumWindow ? _sumWindow.start : new Date(Date.now() - Number(_sumPeriod) * 86_400_000).toISOString();
+}
+
+function _makeSumWindow() {
+  const end = Date.now();
+  const span = Number(_sumPeriod) * 86_400_000;
+  const n = _sumPeriod === '1' ? 4 : 7;
+  const step = span / n;
+  return {
+    start: new Date(end - span).toISOString(),
+    slices: Array.from({ length: n }, (_, i) => ({
+      from: new Date(end - step * (i + 1)).toISOString(),
+      to: i === 0 ? null : new Date(end - step * i).toISOString(),
+    })),
+  };
 }
 
 function _exceptionCond() {
@@ -648,12 +664,15 @@ function _pluginFilter(short) {
   return `<filter type="or">${_cond('typename', 'eq', short)}${_cond('typename', 'like', `${_likeEscape(short)},%`)}</filter>`;
 }
 
-function _sumFilter(extra = []) {
+function _sumFilter(extra = [], range = null) {
   const ignored = [..._ignoredTypes].flatMap(name => [
     _cond('typename', 'ne', name),
     _cond('typename', 'not-like', `${_likeEscape(name)},%`),
   ]);
-  return `<filter type="and">${[_cond('createdon', 'ge', _sumFrom()), ...ignored, ...extra].join('')}</filter>`;
+  const time = range
+    ? [_cond('createdon', 'ge', range.from), ...(range.to ? [_cond('createdon', 'lt', range.to)] : [])]
+    : [_cond('createdon', 'ge', _sumFrom())];
+  return `<filter type="and">${[...time, ...ignored, ...extra].join('')}</filter>`;
 }
 
 function _fmtMs(ms) {
@@ -677,17 +696,8 @@ function _isRecordLimitError(e) {
   return /AggregateQueryRecordLimit|record limit|50000|50,000/i.test(String(e && e.message));
 }
 
-async function _groupStats(extra, kind) {
-  const filter = _sumFilter(extra);
-  const groups = new Map();
-  const add = (typename, n, mx, last) => {
-    const name = _shortName(typename ?? '') || '(unknown plugin)';
-    const g = groups.get(name) || { name, n: 0, mx: null, last: null };
-    g.n += n;
-    if (mx != null && (g.mx == null || mx > g.mx)) g.mx = mx;
-    if (last && (!g.last || last > g.last)) g.last = last;
-    groups.set(name, g);
-  };
+async function _groupSlice(extra, kind, range) {
+  const filter = _sumFilter(extra, range);
   const aggXml =
     '<fetch aggregate="true"><entity name="plugintracelog">' +
       '<attribute name="typename" alias="t" groupby="true"/>' +
@@ -698,11 +708,13 @@ async function _groupStats(extra, kind) {
     '</entity></fetch>';
   try {
     const d = await _d365Fetch(_fetchXmlUrl(aggXml), {}, SUMMARY_TIMEOUT_MS);
-    (d.value ?? []).forEach(r => add(r.t, Number(r.n) || 0, r.mx != null ? Number(r.mx) : null, r.last ?? null));
-    return { groups: [...groups.values()], exact: true };
+    return {
+      rows: (d.value ?? []).map(r => ({ t: r.t, n: Number(r.n) || 0, mx: r.mx != null ? Number(r.mx) : null, last: r.last ?? null })),
+      exact: true,
+    };
   } catch (e) {
     if (!_isRecordLimitError(e)) throw e;
-    console.warn('[EF PPT] Too many logs to aggregate; summarising the newest 5,000 instead.', e);
+    console.warn('[EF PPT] Too many logs to aggregate in one slice; using its newest 5,000.', e);
   }
   const sampleXml =
     '<fetch count="5000" page="1"><entity name="plugintracelog">' +
@@ -711,8 +723,69 @@ async function _groupStats(extra, kind) {
       filter +
     '</entity></fetch>';
   const d = await _d365Fetch(_fetchXmlUrl(sampleXml), { 'Prefer': 'odata.include-annotations="*"' }, SUMMARY_TIMEOUT_MS);
-  (d.value ?? []).forEach(r => add(r.typename, 1, r.performanceexecutionduration != null ? Number(r.performanceexecutionduration) : null, r.createdon));
-  return { groups: [...groups.values()], exact: d['@Microsoft.Dynamics.CRM.morerecords'] !== true, sampled: true };
+  return {
+    rows: (d.value ?? []).map(r => ({
+      t: r.typename, n: 1,
+      mx: r.performanceexecutionduration != null ? Number(r.performanceexecutionduration) : null,
+      last: r.createdon,
+    })),
+    exact: d['@Microsoft.Dynamics.CRM.morerecords'] !== true,
+    sampled: true,
+  };
+}
+
+async function _groupStats(extra, kind, slices, onProgress) {
+  const groups = new Map();
+  const state = { groups: [], exact: true, sampled: false, done: 0, slices: slices.length, failed: 0 };
+  let lastError = null;
+  const merge = rows => rows.forEach(r => {
+    const name = _shortName(r.t ?? '') || '(unknown plugin)';
+    const g = groups.get(name) || { name, n: 0, mx: null, last: null };
+    g.n += r.n;
+    if (r.mx != null && (g.mx == null || r.mx > g.mx)) g.mx = r.mx;
+    if (r.last && (!g.last || r.last > g.last)) g.last = r.last;
+    groups.set(name, g);
+  });
+  await Promise.all(slices.map(async range => {
+    try {
+      const r = await _groupSlice(extra, kind, range);
+      merge(r.rows);
+      if (!r.exact) state.exact = false;
+      if (r.sampled) state.sampled = true;
+    } catch (e) {
+      state.failed++;
+      state.exact = false;
+      lastError = e;
+    }
+    state.done++;
+    state.groups = [...groups.values()];
+    onProgress({ ...state });
+  }));
+  if (state.failed === slices.length) throw lastError;
+  return { ...state };
+}
+
+async function _recentExceptions(slices, limit) {
+  const found = [];
+  let lastError = null;
+  for (const range of slices) {
+    const xml =
+      `<fetch count="${limit - found.length}" page="1"><entity name="plugintracelog">` +
+        ['plugintracelogid', 'typename', 'messagename', 'createdon', 'exceptiondetails', 'mode', 'performanceexecutionduration']
+          .map(a => `<attribute name="${a}"/>`).join('') +
+        '<order attribute="createdon" descending="true"/>' +
+        _sumFilter([_exceptionCond()], range) +
+      '</entity></fetch>';
+    try {
+      const d = await _d365Fetch(_fetchXmlUrl(xml), {}, SUMMARY_TIMEOUT_MS);
+      found.push(...(d.value ?? []));
+    } catch (e) {
+      lastError = e;
+    }
+    if (found.length >= limit) break;
+  }
+  if (!found.length && lastError) throw lastError;
+  return found.slice(0, limit);
 }
 
 async function _loadSummary(force = false) {
@@ -721,6 +794,7 @@ async function _loadSummary(force = false) {
   _sumKey = key;
   const token = ++_sumToken;
   _closePane(false);
+  _sumWindow = _makeSumWindow();
 
   document.getElementById('sum-scope').innerHTML = _esc(`${_periodText()} · exceptions and runs of ${LONG_RUN_MS / 1000} s or more`) +
     (_ignoredTypes.size
@@ -741,18 +815,14 @@ async function _loadSummary(force = false) {
   }
   if (token !== _sumToken) return;
   const update = () => { if (token === _sumToken) _renderSummary(); };
-  const recentXml =
-    '<fetch count="12" page="1"><entity name="plugintracelog">' +
-      ['plugintracelogid', 'typename', 'messagename', 'createdon', 'exceptiondetails', 'mode', 'performanceexecutionduration']
-        .map(a => `<attribute name="${a}"/>`).join('') +
-      '<order attribute="createdon" descending="true"/>' +
-      _sumFilter([_exceptionCond()]) +
-    '</entity></fetch>';
+  const slices = _sumWindow.slices;
 
   await Promise.all([
-    _groupStats([_exceptionCond()], 'exceptions').then(r => { data.ex = r; }, e => { data.exErr = e.message; }).then(update),
-    _groupStats([_longRunCond()], 'long').then(r => { data.long = r; }, e => { data.longErr = e.message; }).then(update),
-    _d365Fetch(_fetchXmlUrl(recentXml), {}, SUMMARY_TIMEOUT_MS).then(d => { data.recent = d.value ?? []; }, e => { data.recentErr = e.message; }).then(update),
+    _recentExceptions(slices, 12).then(r => { data.recent = r; }, e => { data.recentErr = e.message; }).then(update),
+    _groupStats([_exceptionCond()], 'exceptions', slices, p => { data.ex = p; update(); })
+      .then(r => { data.ex = r; }, e => { data.exErr = e.message; }).then(update),
+    _groupStats([_longRunCond()], 'long', slices, p => { data.long = p; update(); })
+      .then(r => { data.long = r; }, e => { data.longErr = e.message; }).then(update),
   ]);
   if (token !== _sumToken) return;
   const now = new Date();
@@ -811,8 +881,13 @@ function _renderSummary() {
   }
   const loading = '<div class="sum-msg sum-msg--loading">Loading…</div>';
   const err = msg => `<div class="sum-msg sum-msg--error">${_esc(msg)}</div>`;
-  const sampledNote = r => r && r.sampled && !r.exact ? '<div class="sum-note">Too many logs to total exactly — based on the newest 5,000.</div>' : '';
-  const plus = r => r && !r.exact ? '+' : '';
+  const counting = r => r && r.done < r.slices;
+  const sampledNote = r => !r ? '' :
+    (counting(r) ? `<div class="sum-note">Counting… ${r.done} of ${r.slices} time slices done.</div>` : '') +
+    (r.failed ? `<div class="sum-note sum-note--warn">${r.failed} of ${r.slices} time slices didn't load in time — these numbers are incomplete. Try Refresh or a shorter period.</div>` : '') +
+    (r.sampled && !r.exact && !r.failed ? '<div class="sum-note">Too many logs to total exactly — part of the period is based on its newest 5,000 logs.</div>' : '');
+  const plus = r => r && (!r.exact || counting(r)) ? '+' : '';
+  const progress = (r, text) => counting(r) ? `counting… ${r.done}/${r.slices}` : text;
 
   const ex = d.ex ? d.ex.groups : null;
   const long = d.long ? d.long.groups : null;
@@ -822,17 +897,19 @@ function _renderSummary() {
   const longLabel = `${LONG_RUN_MS / 1000} s or more`;
 
   document.getElementById('sum-kpis').innerHTML =
-    _sumKpi('exceptions', 'Exceptions', d.exErr ? '—' : ex ? `${exTotal.toLocaleString()}${plus(d.ex)}` : '…', _esc(_periodText()), exTotal ? 'bad' : '') +
-    _sumKpi('exceptions', 'Plugins with exceptions', d.exErr ? '—' : ex ? ex.length.toLocaleString() : '…', 'with at least one exception') +
-    _sumKpi('long', 'Long runs', d.longErr ? '—' : long ? `${longTotal.toLocaleString()}${plus(d.long)}` : '…', _esc(longLabel), longTotal ? 'warn' : '') +
-    _sumKpi('long', 'Plugins with long runs', d.longErr ? '—' : long ? long.length.toLocaleString() : '…', _esc(longLabel)) +
+    _sumKpi('exceptions', 'Exceptions', d.exErr ? '—' : ex ? `${exTotal.toLocaleString()}${plus(d.ex)}` : '…', progress(d.ex, _esc(_periodText())), exTotal ? 'bad' : '') +
+    _sumKpi('exceptions', 'Plugins with exceptions', d.exErr ? '—' : ex ? ex.length.toLocaleString() : '…', progress(d.ex, 'with at least one exception')) +
+    _sumKpi('long', 'Long runs', d.longErr ? '—' : long ? `${longTotal.toLocaleString()}${plus(d.long)}` : '…', progress(d.long, _esc(longLabel)), longTotal ? 'warn' : '') +
+    _sumKpi('long', 'Plugins with long runs', d.longErr ? '—' : long ? long.length.toLocaleString() : '…', progress(d.long, _esc(longLabel))) +
     _sumKpi('long', 'Slowest run', d.longErr ? '—' : long ? (slow[0] ? _esc(_fmtMs(slow[0].mx)) : '—') : '…', slow[0] ? _esc(slow[0].name) : long ? 'no long runs' : '');
 
   document.getElementById('sum-exceptions').innerHTML = d.exErr ? err(d.exErr) : !ex ? loading :
+    !ex.length && counting(d.ex) ? loading + sampledNote(d.ex) :
     !ex.length ? `<div class="sum-msg sum-msg--ok">No exceptions in the ${_esc(_periodText())}.</div>` :
     _sumBars('exceptions', ex.slice().sort((a, b) => b.n - a.n).slice(0, 10), g => g.n, g => g.n.toLocaleString(), g => g.last ? `Last exception ${_fmtDateTime(g.last)}` : '', 'bad') + sampledNote(d.ex);
 
   document.getElementById('sum-long').innerHTML = d.longErr ? err(d.longErr) : !long ? loading :
+    !long.length && counting(d.long) ? loading + sampledNote(d.long) :
     !long.length ? `<div class="sum-msg sum-msg--ok">No runs of ${_esc(longLabel)} in the ${_esc(_periodText())}.</div>` :
     _sumBars('long', slow.slice(0, 10), g => g.mx, g => _fmtMs(g.mx), g => `${g.n.toLocaleString()} run${g.n === 1 ? '' : 's'} of ${longLabel}${g.last ? ` · last ${_fmtDateTime(g.last)}` : ''}`, 'warn') + sampledNote(d.long);
 
@@ -866,7 +943,14 @@ let _paneToken = 0;
 function _openPane(kind, plugin) {
   const cfg = PANE_KINDS[kind];
   if (!cfg) return;
-  _pane = { kind, plugin: plugin || null, pages: [], more: [], total: null, capped: false, page: 0, loading: false, token: ++_paneToken };
+  const stats = _sumData && (kind === 'exceptions' ? _sumData.ex : _sumData.long);
+  let total = null;
+  if (stats && stats.done === stats.slices && stats.exact) {
+    total = plugin
+      ? (stats.groups.find(g => g.name === plugin) || { n: 0 }).n
+      : stats.groups.reduce((a, g) => a + g.n, 0);
+  }
+  _pane = { kind, plugin: plugin || null, pages: [], more: [], total, capped: false, page: 0, loading: false, token: ++_paneToken };
   document.getElementById('sum-pane-title').textContent = `${cfg.title} — ${plugin || 'all plugins'}`;
   document.getElementById('sum-pane-title').title = plugin || '';
   document.getElementById('sum-pane-sub').textContent = `${_periodText()} · ${cfg.sub}`;
@@ -894,7 +978,7 @@ function _paneXml(p, index) {
   const order = cfg.order === 'duration'
     ? '<order attribute="performanceexecutionduration" descending="true"/><order attribute="createdon" descending="true"/>'
     : '<order attribute="createdon" descending="true"/>';
-  return `<fetch count="${PAGE_SIZE}" page="${index + 1}" returntotalrecordcount="true">` +
+  return `<fetch count="${PAGE_SIZE}" page="${index + 1}">` +
     '<entity name="plugintracelog">' +
       _ATTRS.map(attr => `<attribute name="${attr}"/>`).join('') +
       order +
@@ -919,9 +1003,15 @@ async function _paneLoad(index) {
   } else {
     _renderPanePager(true);
   }
-  let d;
+  let result;
   try {
-    d = await _d365Fetch(_fetchXmlUrl(_paneXml(p, index)), { 'Prefer': 'odata.include-annotations="*"' }, SUMMARY_TIMEOUT_MS);
+    if (PANE_KINDS[p.kind].exceptions) {
+      const prev = index > 0 ? p.pages[index - 1] : null;
+      result = await _paneFetchSliced(p, prev && prev.length ? prev[prev.length - 1].createdon : null);
+    } else {
+      const d = await _d365Fetch(_fetchXmlUrl(_paneXml(p, index)), { 'Prefer': 'odata.include-annotations="*"' }, SUMMARY_TIMEOUT_MS);
+      result = { rows: (d.value ?? []).slice(0, PAGE_SIZE), more: d['@Microsoft.Dynamics.CRM.morerecords'] === true };
+    }
   } catch (e) {
     if (p !== _pane) return;
     p.loading = false;
@@ -931,15 +1021,30 @@ async function _paneLoad(index) {
   }
   if (p !== _pane) return;
   p.loading = false;
-  if (index === 0) {
-    const total = d['@Microsoft.Dynamics.CRM.totalrecordcount'];
-    p.total = typeof total === 'number' && total >= 0 ? total : null;
-    p.capped = d['@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded'] === true;
-  }
-  p.pages[index] = (d.value ?? []).slice(0, PAGE_SIZE);
-  p.more[index] = d['@Microsoft.Dynamics.CRM.morerecords'] === true;
+  p.pages[index] = result.rows;
+  p.more[index] = result.more;
   p.page = index;
   _renderPane();
+}
+
+async function _paneFetchSliced(p, before) {
+  const extra = [_exceptionCond()];
+  if (p.plugin) extra.push(_pluginFilter(p.plugin));
+  const slices = _sumWindow.slices.filter(slice => !before || slice.from < before);
+  const results = await Promise.all(slices.map(async slice => {
+    const range = { from: slice.from, to: before && (!slice.to || before < slice.to) ? before : slice.to };
+    const xml = `<fetch count="${PAGE_SIZE}" page="1"><entity name="plugintracelog">` +
+      _ATTRS.map(attr => `<attribute name="${attr}"/>`).join('') +
+      '<order attribute="createdon" descending="true"/>' +
+      '<order attribute="plugintracelogid" descending="true"/>' +
+      _sumFilter(extra, range) +
+      '</entity></fetch>';
+    const d = await _d365Fetch(_fetchXmlUrl(xml), { 'Prefer': 'odata.include-annotations="*"' }, SUMMARY_TIMEOUT_MS);
+    return { rows: d.value ?? [], more: d['@Microsoft.Dynamics.CRM.morerecords'] === true };
+  }));
+  const merged = results.flatMap(r => r.rows)
+    .sort((a, b) => String(b.createdon).localeCompare(String(a.createdon)) || String(b.plugintracelogid).localeCompare(String(a.plugintracelogid)));
+  return { rows: merged.slice(0, PAGE_SIZE), more: merged.length > PAGE_SIZE || results.some(r => r.more) };
 }
 
 function _renderPanePager(busy) {

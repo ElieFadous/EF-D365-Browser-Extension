@@ -734,7 +734,8 @@ html, body {
 .sum-kpi--bad .sum-kpi-value { color: #b91c1c; }
 .sum-kpi--warn .sum-kpi-value { color: #b45309; }
 
-.sum-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.sum-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 760px) { .sum-grid { grid-template-columns: minmax(0, 1fr); } }
 .sum-card {
   min-width: 0;
   background: var(--card);
@@ -770,6 +771,7 @@ html, body {
 .sum-bars--warn .sum-bar span { background: #f59e0b; }
 .sum-val { text-align: right; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sum-note { padding: 4px 14px 6px; font-size: 11px; color: var(--text-muted); }
+.sum-note--warn { color: #b45309; }
 
 .sum-flow {
   max-width: 100%;
