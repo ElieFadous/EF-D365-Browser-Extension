@@ -172,6 +172,7 @@ html, body {
   padding: 1px 7px;
   border-radius: 10px;
 }
+.panel-count--warn { color: #92400e; background: #fef3c7; cursor: help; }
 
 .exec-scope {
   font-size: 12px;

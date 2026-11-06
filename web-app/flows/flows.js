@@ -23,6 +23,11 @@ let _selectedFlowId      = null;
 let _allExecutions       = [];
 let _filteredExecutions  = [];
 const _orgId             = PA_ENV_ID; // Power Platform environment ID from extension settings
+const RUN_FLOW_CHUNK     = 25;
+const RUN_MAX_PAGES      = 100;
+let _execToken           = 0;
+let _execTruncated       = false;
+let _runFlowIdText       = null;
 
 // Execution table sort state
 let _execSortKey = 'date';
@@ -171,7 +176,7 @@ async function _d365Fetch(url, extraHeaders = {}) {
   return _bridgeFetch(url, extraHeaders);
 }
 
-async function _fetchAllPages(firstUrl, maxPages = 20) {
+async function _fetchAllPages(firstUrl, maxPages = 20, onPage = null) {
   const records = [];
   let nextUrl   = firstUrl;
   let page      = 0;
@@ -180,10 +185,27 @@ async function _fetchAllPages(firstUrl, maxPages = 20) {
     const data = await _d365Fetch(nextUrl, {
       'Prefer': 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=500',
     });
-    records.push(...(data.value ?? []));
+    const value = data.value ?? [];
+    records.push(...value);
+    if (onPage) onPage(value);
     nextUrl = data['@odata.nextLink'] ?? null;
   }
+  records.truncated = !!nextUrl;
   return records;
+}
+
+async function _runFlowIdIsText() {
+  if (_runFlowIdText !== null) return _runFlowIdText;
+  try {
+    const attr = await _d365Fetch(
+      `${ENV_URL}/api/data/v9.2/EntityDefinitions(LogicalName='flowrun')/Attributes(LogicalName='workflowid')?$select=AttributeType`
+    );
+    _runFlowIdText = attr.AttributeType === 'String' || attr.AttributeType === 'Memo';
+  } catch (e) {
+    console.warn('[EF PPT] Could not read the flowrun.workflowid column type:', e);
+    _runFlowIdText = false;
+  }
+  return _runFlowIdText;
 }
 
 // ─── Solutions ─────────────────────────────────────────────────────────────────
@@ -300,23 +322,39 @@ async function _loadExecutions() {
     if (fromVal) conditions.push(`starttime ge ${new Date(fromVal).toISOString()}`);
     if (toVal)   conditions.push(`starttime le ${new Date(toVal).toISOString()}`);
 
-    const filter  = conditions.length > 0 ? `&$filter=${conditions.join(' and ')}` : '';
-    const execUrl = `${ENV_URL}/api/data/v9.2/flowruns` +
-      `?$select=name,workflowid,status,errorcode,starttime,createdon,duration,modifiedon` +
-      `&$orderby=starttime desc` +
-      filter;
+    const token     = ++_execToken;
+    const quoteIds  = await _runFlowIdIsText();
+    const flowIds   = _allFlows.map(f => (f.workflowid ?? '').toLowerCase()).filter(Boolean);
+    const flowIdSet = new Set(flowIds);
+    const chunks    = [];
+    for (let i = 0; i < flowIds.length; i += RUN_FLOW_CHUNK) chunks.push(flowIds.slice(i, i + RUN_FLOW_CHUNK));
 
-    const flowIdSet = new Set(_allFlows.map(f => (f.workflowid ?? '').toLowerCase()));
-    const raw = await _fetchAllPages(execUrl, 10); // up to 5 000 records
+    const raw = [];
+    let truncated = false;
+    let done = 0;
+    await Promise.all(chunks.map(async ids => {
+      const idClause = ids.map(id => `workflowid eq ${quoteIds ? `'${id}'` : id}`).join(' or ');
+      const execUrl = `${ENV_URL}/api/data/v9.2/flowruns` +
+        `?$select=name,workflowid,status,errorcode,starttime,createdon,duration,modifiedon` +
+        `&$filter=${encodeURIComponent([`(${idClause})`, ...conditions].join(' and '))}` +
+        `&$orderby=starttime desc`;
+      const result = await _fetchAllPages(execUrl, RUN_MAX_PAGES, pageRecords => {
+        if (token !== _execToken) return;
+        done += pageRecords.length;
+        _updatePanelMsg('exec-list', `Loading executions… ${done.toLocaleString()} so far`);
+      });
+      if (result.truncated) truncated = true;
+      raw.push(...result);
+    }));
+    if (token !== _execToken) return;
 
-    // Filter client-side to only runs belonging to flows in this solution.
-    _allExecutions = raw.filter(e =>
-      flowIdSet.has((e.workflowid ?? '').toLowerCase())
-    );
+    _allExecutions = raw.filter(e => flowIdSet.has((e.workflowid ?? '').toLowerCase()));
+    _execTruncated = truncated;
 
     _renderExecutions();
   } catch (e) {
     console.error('[EF PPT]', e);
+    _execToken++;
     _showPanelMsg('exec-list', `Error loading executions: ${e.message}`, 'error');
   }
 }
@@ -456,8 +494,13 @@ function _renderExecutions() {
     return true;
   });
 
-  document.getElementById('exec-count').textContent =
-    `${_filteredExecutions.length} of ${_allExecutions.length}`;
+  const countEl = document.getElementById('exec-count');
+  countEl.textContent =
+    `${_filteredExecutions.length.toLocaleString()} of ${_allExecutions.length.toLocaleString()}${_execTruncated ? '+' : ''}`;
+  countEl.title = _execTruncated
+    ? 'Some flows have more runs in this date range than can be loaded at once — narrow the date range to see them all'
+    : '';
+  countEl.classList.toggle('panel-count--warn', _execTruncated);
 
   const list = document.getElementById('exec-list');
   if (_filteredExecutions.length === 0) {
@@ -595,6 +638,11 @@ function _execStatus(exec) {
 function _showPanelMsg(panelId, msg, type = 'info') {
   document.getElementById(panelId).innerHTML =
     `<div class="state-msg state-${type}">${_esc(msg)}</div>`;
+}
+
+function _updatePanelMsg(panelId, msg) {
+  const el = document.querySelector(`#${panelId} > .state-msg`);
+  if (el) el.textContent = msg;
 }
 
 function _fmtDate(iso) {
