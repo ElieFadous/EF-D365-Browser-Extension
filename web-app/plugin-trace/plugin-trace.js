@@ -150,13 +150,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 const _inModal = true; // always iframe in web-app
 
-function _bridgeFetch(url, extraHeaders = {}, method = 'GET', body = null) {
+function _bridgeFetch(url, extraHeaders = {}, method = 'GET', body = null, timeoutMs = 30_000) {
   return new Promise((resolve, reject) => {
     const id    = Math.random().toString(36).slice(2) + Date.now();
     const timer = setTimeout(() => {
       window.removeEventListener('message', onMsg);
-      reject(new Error('Bridge fetch timeout'));
-    }, 30_000);
+      reject(new Error(`D365 didn't respond within ${Math.round(timeoutMs / 1000)} seconds — try a shorter period.`));
+    }, timeoutMs);
     function onMsg(e) {
       if (!e.data || e.data.__efppt !== 'fetch-result' || e.data.id !== id) return;
       clearTimeout(timer);
@@ -170,8 +170,8 @@ function _bridgeFetch(url, extraHeaders = {}, method = 'GET', body = null) {
   });
 }
 
-async function _d365Fetch(url, extraHeaders = {}) {
-  return _bridgeFetch(url, extraHeaders);
+async function _d365Fetch(url, extraHeaders = {}, timeoutMs = 30_000) {
+  return _bridgeFetch(url, extraHeaders, 'GET', null, timeoutMs);
 }
 
 // ─── Entity set name resolver ─────────────────────────────────────────────────
@@ -666,15 +666,25 @@ function _fmtMs(ms) {
   return `${m}m ${Math.round(s % 60)}s`;
 }
 
-async function _groupStats(extra, withDurations) {
+const LONG_RUN_MS = 10_000;
+const SUMMARY_TIMEOUT_MS = 90_000;
+
+function _longRunCond() {
+  return _cond('performanceexecutionduration', 'ge', String(LONG_RUN_MS));
+}
+
+function _isRecordLimitError(e) {
+  return /AggregateQueryRecordLimit|record limit|50000|50,000/i.test(String(e && e.message));
+}
+
+async function _groupStats(extra, kind) {
   const filter = _sumFilter(extra);
   const groups = new Map();
-  const add = (typename, n, mx, av, last) => {
+  const add = (typename, n, mx, last) => {
     const name = _shortName(typename ?? '') || '(unknown plugin)';
-    const g = groups.get(name) || { name, n: 0, mx: null, sum: 0, nd: 0, last: null };
+    const g = groups.get(name) || { name, n: 0, mx: null, last: null };
     g.n += n;
     if (mx != null && (g.mx == null || mx > g.mx)) g.mx = mx;
-    if (av != null) { g.sum += av * n; g.nd += n; }
     if (last && (!g.last || last > g.last)) g.last = last;
     groups.set(name, g);
   };
@@ -682,36 +692,26 @@ async function _groupStats(extra, withDurations) {
     '<fetch aggregate="true"><entity name="plugintracelog">' +
       '<attribute name="typename" alias="t" groupby="true"/>' +
       '<attribute name="plugintracelogid" alias="n" aggregate="count"/>' +
-      (withDurations
-        ? '<attribute name="performanceexecutionduration" alias="mx" aggregate="max"/>' +
-          '<attribute name="performanceexecutionduration" alias="av" aggregate="avg"/>'
-        : '<attribute name="createdon" alias="last" aggregate="max"/>') +
+      '<attribute name="createdon" alias="last" aggregate="max"/>' +
+      (kind === 'long' ? '<attribute name="performanceexecutionduration" alias="mx" aggregate="max"/>' : '') +
       filter +
     '</entity></fetch>';
   try {
-    const d = await _d365Fetch(_fetchXmlUrl(aggXml));
-    (d.value ?? []).forEach(r => add(
-      r.t, Number(r.n) || 0,
-      r.mx != null ? Number(r.mx) : null,
-      r.av != null ? Number(r.av) : null,
-      r.last ?? null
-    ));
+    const d = await _d365Fetch(_fetchXmlUrl(aggXml), {}, SUMMARY_TIMEOUT_MS);
+    (d.value ?? []).forEach(r => add(r.t, Number(r.n) || 0, r.mx != null ? Number(r.mx) : null, r.last ?? null));
     return { groups: [...groups.values()], exact: true };
   } catch (e) {
-    console.warn('[EF PPT] Aggregate query failed; summarising the newest 5,000 logs instead.', e);
+    if (!_isRecordLimitError(e)) throw e;
+    console.warn('[EF PPT] Too many logs to aggregate; summarising the newest 5,000 instead.', e);
   }
   const sampleXml =
     '<fetch count="5000" page="1"><entity name="plugintracelog">' +
-      '<attribute name="typename"/><attribute name="createdon"/>' +
-      (withDurations ? '<attribute name="performanceexecutionduration"/>' : '') +
+      '<attribute name="typename"/><attribute name="createdon"/><attribute name="performanceexecutionduration"/>' +
       '<order attribute="createdon" descending="true"/>' +
       filter +
     '</entity></fetch>';
-  const d = await _d365Fetch(_fetchXmlUrl(sampleXml), { 'Prefer': 'odata.include-annotations="*"' });
-  (d.value ?? []).forEach(r => {
-    const ms = r.performanceexecutionduration != null ? Number(r.performanceexecutionduration) : null;
-    add(r.typename, 1, ms, ms, r.createdon);
-  });
+  const d = await _d365Fetch(_fetchXmlUrl(sampleXml), { 'Prefer': 'odata.include-annotations="*"' }, SUMMARY_TIMEOUT_MS);
+  (d.value ?? []).forEach(r => add(r.typename, 1, r.performanceexecutionduration != null ? Number(r.performanceexecutionduration) : null, r.createdon));
   return { groups: [...groups.values()], exact: d['@Microsoft.Dynamics.CRM.morerecords'] !== true, sampled: true };
 }
 
@@ -722,13 +722,13 @@ async function _loadSummary(force = false) {
   const token = ++_sumToken;
   _closePane(false);
 
-  document.getElementById('sum-scope').innerHTML = _esc(_periodText()) +
+  document.getElementById('sum-scope').innerHTML = _esc(`${_periodText()} · exceptions and runs of ${LONG_RUN_MS / 1000} s or more`) +
     (_ignoredTypes.size
       ? ` · <span title="${_esc([..._ignoredTypes].sort().join('\n'))}">${_ignoredTypes.size} plugin type${_ignoredTypes.size === 1 ? '' : 's'} ignored</span> <button type="button" class="pt-link-btn" data-unignore>Show all</button>`
       : '');
   document.getElementById('sum-updated').textContent = '';
 
-  const data = _sumData = { all: null, allErr: null, ex: null, exErr: null, recent: null, recentErr: null };
+  const data = _sumData = { ex: null, exErr: null, long: null, longErr: null, recent: null, recentErr: null };
   _renderSummary();
 
   try {
@@ -750,9 +750,9 @@ async function _loadSummary(force = false) {
     '</entity></fetch>';
 
   await Promise.all([
-    _groupStats([], true).then(r => { data.all = r; }, e => { data.allErr = e.message; }).then(update),
-    _groupStats([_exceptionCond()], false).then(r => { data.ex = r; }, e => { data.exErr = e.message; }).then(update),
-    _d365Fetch(_fetchXmlUrl(recentXml)).then(d => { data.recent = d.value ?? []; }, e => { data.recentErr = e.message; }).then(update),
+    _groupStats([_exceptionCond()], 'exceptions').then(r => { data.ex = r; }, e => { data.exErr = e.message; }).then(update),
+    _groupStats([_longRunCond()], 'long').then(r => { data.long = r; }, e => { data.longErr = e.message; }).then(update),
+    _d365Fetch(_fetchXmlUrl(recentXml), {}, SUMMARY_TIMEOUT_MS).then(d => { data.recent = d.value ?? []; }, e => { data.recentErr = e.message; }).then(update),
   ]);
   if (token !== _sumToken) return;
   const now = new Date();
@@ -796,16 +796,12 @@ function _renderSummary() {
       <div class="sum-kpis" id="sum-kpis"></div>
       <div class="sum-grid">
         <section class="sum-card">
-          <header class="sum-card-head"><span>Slowest plugins</span><small>longest single execution</small></header>
-          <div class="sum-card-body" id="sum-slowest"></div>
-        </section>
-        <section class="sum-card">
           <header class="sum-card-head"><span>Most exceptions</span><small>failed executions per plugin</small></header>
           <div class="sum-card-body" id="sum-exceptions"></div>
         </section>
         <section class="sum-card">
-          <header class="sum-card-head"><span>Busiest plugins</span><small>executions per plugin</small></header>
-          <div class="sum-card-body" id="sum-busiest"></div>
+          <header class="sum-card-head"><span>Long-running plugins</span><small>runs of ${LONG_RUN_MS / 1000} s or more</small></header>
+          <div class="sum-card-body" id="sum-long"></div>
         </section>
         <section class="sum-card sum-card--wide">
           <header class="sum-card-head"><span>Most recent exceptions</span><small>click a plugin to see all its exceptions</small></header>
@@ -815,34 +811,30 @@ function _renderSummary() {
   }
   const loading = '<div class="sum-msg sum-msg--loading">Loading…</div>';
   const err = msg => `<div class="sum-msg sum-msg--error">${_esc(msg)}</div>`;
-  const sampledNote = r => r && r.sampled && !r.exact ?'<div class="sum-note">Too many logs to total exactly — based on the newest 5,000.</div>' : '';
-
-  const all = d.all ? d.all.groups : null;
-  const ex = d.ex ? d.ex.groups : null;
-  const total = all ? all.reduce((a, g) => a + g.n, 0) : null;
-  const exTotal = ex ? ex.reduce((a, g) => a + g.n, 0) : null;
-  const slow = all ? all.filter(g => g.mx != null).sort((a, b) => b.mx - a.mx) : [];
-  const nd = all ? all.reduce((a, g) => a + g.nd, 0) : 0;
-  const avg = nd ? all.reduce((a, g) => a + g.sum, 0) / nd : null;
+  const sampledNote = r => r && r.sampled && !r.exact ? '<div class="sum-note">Too many logs to total exactly — based on the newest 5,000.</div>' : '';
   const plus = r => r && !r.exact ? '+' : '';
-  const rate = d.all && d.ex && d.all.exact && d.ex.exact && total
-    ? `${((exTotal / total) * 100).toFixed(exTotal / total < 0.1 ? 1 : 0)}% of executions`
-    : _esc(_periodText());
+
+  const ex = d.ex ? d.ex.groups : null;
+  const long = d.long ? d.long.groups : null;
+  const exTotal = ex ? ex.reduce((a, g) => a + g.n, 0) : null;
+  const longTotal = long ? long.reduce((a, g) => a + g.n, 0) : null;
+  const slow = long ? long.filter(g => g.mx != null).sort((a, b) => b.mx - a.mx) : [];
+  const longLabel = `${LONG_RUN_MS / 1000} s or more`;
 
   document.getElementById('sum-kpis').innerHTML =
-    _sumKpi('all', 'Executions', d.allErr ? '—' : all ? `${total.toLocaleString()}${plus(d.all)}` : '…', _esc(_periodText())) +
-    _sumKpi('exceptions', 'Exceptions', d.exErr ? '—' : ex ? `${exTotal.toLocaleString()}${plus(d.ex)}` : '…', rate, exTotal ? 'bad' : '') +
-    _sumKpi('exceptions', 'Plugins with exceptions', d.exErr ? '—' : ex ? ex.length.toLocaleString() : '…', all ? `of ${all.length.toLocaleString()} plugins` : '') +
-    _sumKpi('slowest', 'Slowest execution', d.allErr ? '—' : all ? (slow[0] ? _esc(_fmtMs(slow[0].mx)) : '—') : '…', slow[0] ? _esc(slow[0].name) : '') +
-    _sumKpi('slowest', 'Average duration', d.allErr ? '—' : all ? _esc(_fmtMs(avg)) : '…', 'per execution');
+    _sumKpi('exceptions', 'Exceptions', d.exErr ? '—' : ex ? `${exTotal.toLocaleString()}${plus(d.ex)}` : '…', _esc(_periodText()), exTotal ? 'bad' : '') +
+    _sumKpi('exceptions', 'Plugins with exceptions', d.exErr ? '—' : ex ? ex.length.toLocaleString() : '…', 'with at least one exception') +
+    _sumKpi('long', 'Long runs', d.longErr ? '—' : long ? `${longTotal.toLocaleString()}${plus(d.long)}` : '…', _esc(longLabel), longTotal ? 'warn' : '') +
+    _sumKpi('long', 'Plugins with long runs', d.longErr ? '—' : long ? long.length.toLocaleString() : '…', _esc(longLabel)) +
+    _sumKpi('long', 'Slowest run', d.longErr ? '—' : long ? (slow[0] ? _esc(_fmtMs(slow[0].mx)) : '—') : '…', slow[0] ? _esc(slow[0].name) : long ? 'no long runs' : '');
 
-  document.getElementById('sum-slowest').innerHTML = d.allErr ? err(d.allErr) : !all ? loading :
-    _sumBars('slowest', slow.slice(0, 8), g => g.mx, g => _fmtMs(g.mx), g => `Average ${_fmtMs(g.nd ? g.sum / g.nd : null)} over ${g.n.toLocaleString()} executions`) + sampledNote(d.all);
-  document.getElementById('sum-busiest').innerHTML = d.allErr ? err(d.allErr) : !all ? loading :
-    _sumBars('all', all.slice().sort((a, b) => b.n - a.n).slice(0, 8), g => g.n, g => g.n.toLocaleString(), g => `Average ${_fmtMs(g.nd ? g.sum / g.nd : null)}`) + sampledNote(d.all);
   document.getElementById('sum-exceptions').innerHTML = d.exErr ? err(d.exErr) : !ex ? loading :
     !ex.length ? `<div class="sum-msg sum-msg--ok">No exceptions in the ${_esc(_periodText())}.</div>` :
-    _sumBars('exceptions', ex.slice().sort((a, b) => b.n - a.n).slice(0, 8), g => g.n, g => g.n.toLocaleString(), g => g.last ? `Last exception ${_fmtDateTime(g.last)}` : '', 'bad') + sampledNote(d.ex);
+    _sumBars('exceptions', ex.slice().sort((a, b) => b.n - a.n).slice(0, 10), g => g.n, g => g.n.toLocaleString(), g => g.last ? `Last exception ${_fmtDateTime(g.last)}` : '', 'bad') + sampledNote(d.ex);
+
+  document.getElementById('sum-long').innerHTML = d.longErr ? err(d.longErr) : !long ? loading :
+    !long.length ? `<div class="sum-msg sum-msg--ok">No runs of ${_esc(longLabel)} in the ${_esc(_periodText())}.</div>` :
+    _sumBars('long', slow.slice(0, 10), g => g.mx, g => _fmtMs(g.mx), g => `${g.n.toLocaleString()} run${g.n === 1 ? '' : 's'} of ${longLabel}${g.last ? ` · last ${_fmtDateTime(g.last)}` : ''}`, 'warn') + sampledNote(d.long);
 
   const recentEl = document.getElementById('sum-recent');
   if (d.recentErr) recentEl.innerHTML = err(d.recentErr);
@@ -866,9 +858,8 @@ function _renderSummary() {
 }
 
 const PANE_KINDS = {
-  all:        { title: 'Executions',         sub: 'newest first',  order: 'createdon' },
-  exceptions: { title: 'Exceptions',         sub: 'newest first',  order: 'createdon', exceptions: true },
-  slowest:    { title: 'Slowest executions', sub: 'slowest first', order: 'duration' },
+  exceptions: { title: 'Exceptions', sub: 'newest first',  order: 'createdon', exceptions: true },
+  long:       { title: 'Long runs',  sub: `${LONG_RUN_MS / 1000} s or more · slowest first`, order: 'duration', long: true },
 };
 let _paneToken = 0;
 
@@ -898,6 +889,7 @@ function _paneXml(p, index) {
   const cfg = PANE_KINDS[p.kind];
   const extra = [];
   if (cfg.exceptions) extra.push(_exceptionCond());
+  if (cfg.long) extra.push(_longRunCond());
   if (p.plugin) extra.push(_pluginFilter(p.plugin));
   const order = cfg.order === 'duration'
     ? '<order attribute="performanceexecutionduration" descending="true"/><order attribute="createdon" descending="true"/>'
@@ -929,7 +921,7 @@ async function _paneLoad(index) {
   }
   let d;
   try {
-    d = await _d365Fetch(_fetchXmlUrl(_paneXml(p, index)), { 'Prefer': 'odata.include-annotations="*"' });
+    d = await _d365Fetch(_fetchXmlUrl(_paneXml(p, index)), { 'Prefer': 'odata.include-annotations="*"' }, SUMMARY_TIMEOUT_MS);
   } catch (e) {
     if (p !== _pane) return;
     p.loading = false;
