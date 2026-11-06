@@ -28,16 +28,31 @@
 
     <!-- ── Solution bar ── -->
     <div class="solution-bar">
-      <label class="sol-label" for="solution-select">Solution</label>
-      <select id="solution-select" class="sol-select">
-        <option value="">Loading solutions…</option>
-      </select>
-      <button id="btn-set-default" class="sol-icon-btn" title="Set as default solution">☆</button>
-      <button id="btn-refresh"     class="sol-icon-btn" title="Refresh flows">&#8635;</button>
+      <span class="sol-label">Solutions</span>
+      <div class="sol-ms" id="sol-ms">
+        <button type="button" class="sol-ms-btn" id="sol-ms-btn" aria-haspopup="listbox" aria-expanded="false" disabled>
+          <span class="sol-ms-label sol-ms-label--placeholder" id="sol-ms-label">Loading solutions…</span>
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>
+        </button>
+        <div class="sol-ms-panel hidden" id="sol-ms-panel">
+          <div class="sol-ms-search"><input type="search" id="sol-ms-search" class="search-input" placeholder="Filter solutions…" autocomplete="off" /></div>
+          <ul class="sol-ms-list" id="sol-ms-list" role="listbox" aria-multiselectable="true"></ul>
+          <div class="sol-ms-foot">
+            <span class="sol-ms-hint">&#9733; Favourites are selected automatically when you open Flows</span>
+            <button type="button" class="sol-ms-clear" id="sol-ms-clear">Clear</button>
+            <button type="button" class="apply-btn" id="sol-ms-apply">Load</button>
+          </div>
+        </div>
+      </div>
+      <div class="view-tabs" role="tablist">
+        <button type="button" class="view-tab active" data-view="runs" role="tab" aria-selected="true">Runs</button>
+        <button type="button" class="view-tab" data-view="summary" role="tab" aria-selected="false">Summary</button>
+      </div>
+      <button id="btn-refresh" class="sol-icon-btn" title="Refresh">&#8635;</button>
     </div>
 
     <!-- ── Two-panel body ── -->
-    <div class="app-body">
+    <div class="app-body" id="runs-view">
 
       <!-- Flows panel -->
       <div class="panel flows-panel">
@@ -110,6 +125,38 @@
         <div id="exec-pager" class="exec-pager hidden"></div>
       </div>
 
+    </div>
+
+    <div class="summary hidden" id="summary-view">
+      <div class="summary-main">
+        <div class="sum-toolbar">
+          <span class="panel-title">Summary</span>
+          <span class="sum-scope" id="sum-scope"></span>
+          <span class="sum-spacer"></span>
+          <span class="sum-updated" id="sum-updated"></span>
+          <div class="seg-ctrl" id="sum-period" role="group" aria-label="Period">
+            <button type="button" class="seg-btn" data-period="1">24 hours</button>
+            <button type="button" class="seg-btn active" data-period="7">7 days</button>
+            <button type="button" class="seg-btn" data-period="28">28 days</button>
+          </div>
+        </div>
+        <div class="sum-content" id="sum-content">
+          <div class="state-msg state-info">Choose one or more solutions above to see a summary.</div>
+        </div>
+      </div>
+      <aside class="sum-pane hidden" id="sum-pane">
+        <div class="sum-pane-head">
+          <div class="sum-pane-titles">
+            <div class="sum-pane-title" id="sum-pane-title"></div>
+            <div class="sum-pane-sub" id="sum-pane-sub"></div>
+          </div>
+          <a class="sum-pane-flow hidden" id="sum-pane-flow" target="_blank" rel="noopener noreferrer">Open flow &#8599;</a>
+          <span class="panel-count" id="sum-pane-count"></span>
+          <button type="button" class="sum-pane-close" id="sum-pane-close" title="Close" aria-label="Close">&#215;</button>
+        </div>
+        <div class="panel-body" id="sum-pane-list"></div>
+        <div class="exec-pager hidden" id="sum-pane-pager"></div>
+      </aside>
     </div>
   </div>
   <script src="flows.js"></script>
