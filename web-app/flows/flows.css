@@ -270,6 +270,33 @@ html, body {
   overflow-x: hidden;
 }
 
+.exec-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: #f7f9fc;
+  flex-shrink: 0;
+}
+.exec-pager.hidden { display: none; }
+.exec-pager__btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.exec-pager__btn:hover:not(:disabled) { background: #eef2ff; border-color: #c7d2fe; }
+.exec-pager__btn:disabled { color: #b0b8c6; cursor: default; }
+.exec-pager__label { padding: 0 8px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+
 /* ── Search ──────────────────────────────────────────────────────────────────── */
 
 .search-wrap {

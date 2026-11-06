@@ -23,11 +23,17 @@ let _selectedFlowId      = null;
 let _allExecutions       = [];
 let _filteredExecutions  = [];
 const _orgId             = PA_ENV_ID; // Power Platform environment ID from extension settings
-const RUN_FLOW_CHUNK     = 25;
-const RUN_MAX_PAGES      = 100;
+const RUN_PAGE_SIZE      = 100;
+const RUN_MAX_FLOWS      = 300;
 let _execToken           = 0;
-let _execTruncated       = false;
-let _runFlowIdText       = null;
+let _runMetaCache        = null;
+let _runPages            = [];
+let _runNext             = [];
+let _runPage             = 0;
+let _runFirstUrl         = null;
+let _runLoading          = false;
+let _runErrorSearchOff   = false;
+let _execReloadTimer     = null;
 
 // Execution table sort state
 let _execSortKey = 'date';
@@ -99,22 +105,28 @@ function _bindControls() {
 
   // Execution controls
   document.getElementById('btn-apply-exec').addEventListener('click', _loadExecutions);
-  document.getElementById('exec-search').addEventListener('input', _renderExecutions);
-  document.getElementById('exec-status-filter').addEventListener('change', _renderExecutions);
+  document.getElementById('exec-search').addEventListener('input', _queueLoadExecutions);
+  document.getElementById('exec-search').addEventListener('keydown', e => { if (e.key === 'Enter') _loadExecutions(); });
+  document.getElementById('exec-status-filter').addEventListener('change', _loadExecutions);
+  document.getElementById('exec-pager').addEventListener('click', e => {
+    const btn = e.target.closest('[data-page]');
+    if (!btn || btn.disabled) return;
+    _loadRunPage(btn.dataset.page === 'first' ? 0 : btn.dataset.page === 'prev' ? _runPage - 1 : _runPage + 1);
+  });
   ['exec-from', 'exec-to'].forEach(id =>
     document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') _loadExecutions(); })
   );
 
-  // Duration filter (client-side, no API reload needed)
+  // Duration filter
   ['dur-op', 'dur-unit'].forEach(id =>
-    document.getElementById(id).addEventListener('change', _renderExecutions)
+    document.getElementById(id).addEventListener('change', _queueLoadExecutions)
   );
-  document.getElementById('dur-value').addEventListener('input', _renderExecutions);
+  document.getElementById('dur-value').addEventListener('input', _queueLoadExecutions);
   document.getElementById('btn-clear-dur').addEventListener('click', () => {
     document.getElementById('dur-op').value    = '';
     document.getElementById('dur-value').value = '';
     document.getElementById('dur-unit').value  = 'ms';
-    _renderExecutions();
+    _loadExecutions();
   });
 
   // Clear flow filter
@@ -123,7 +135,7 @@ function _bindControls() {
     document.getElementById('exec-scope').textContent = '';
     document.getElementById('btn-clear-flow-filter').classList.add('hidden');
     document.querySelectorAll('.flow-item').forEach(el => el.classList.remove('selected'));
-    _renderExecutions();
+    _loadExecutions();
   });
 }
 
@@ -194,18 +206,23 @@ async function _fetchAllPages(firstUrl, maxPages = 20, onPage = null) {
   return records;
 }
 
-async function _runFlowIdIsText() {
-  if (_runFlowIdText !== null) return _runFlowIdText;
+async function _runMeta() {
+  if (_runMetaCache) return _runMetaCache;
+  const meta = { idText: false, durationNumeric: true };
   try {
-    const attr = await _d365Fetch(
-      `${ENV_URL}/api/data/v9.2/EntityDefinitions(LogicalName='flowrun')/Attributes(LogicalName='workflowid')?$select=AttributeType`
+    const filter = encodeURIComponent("LogicalName eq 'workflowid' or LogicalName eq 'duration'");
+    const data = await _d365Fetch(
+      `${ENV_URL}/api/data/v9.2/EntityDefinitions(LogicalName='flowrun')/Attributes?$select=LogicalName,AttributeType&$filter=${filter}`
     );
-    _runFlowIdText = attr.AttributeType === 'String' || attr.AttributeType === 'Memo';
+    (data.value ?? []).forEach(attr => {
+      if (attr.LogicalName === 'workflowid') meta.idText = attr.AttributeType === 'String' || attr.AttributeType === 'Memo';
+      if (attr.LogicalName === 'duration') meta.durationNumeric = ['Integer', 'BigInt', 'Decimal', 'Double', 'Money'].includes(attr.AttributeType);
+    });
   } catch (e) {
-    console.warn('[EF PPT] Could not read the flowrun.workflowid column type:', e);
-    _runFlowIdText = false;
+    console.warn('[EF PPT] Could not read the flowrun column types:', e);
   }
-  return _runFlowIdText;
+  _runMetaCache = meta;
+  return meta;
 }
 
 // ─── Solutions ─────────────────────────────────────────────────────────────────
@@ -296,14 +313,95 @@ async function _loadFlows() {
 
 // ─── Executions ────────────────────────────────────────────────────────────────
 
+function _queueLoadExecutions() {
+  clearTimeout(_execReloadTimer);
+  _execReloadTimer = setTimeout(_loadExecutions, 400);
+}
+
+function _durationFilterMs() {
+  const op   = document.getElementById('dur-op').value;
+  const raw  = parseFloat(document.getElementById('dur-value').value);
+  const unit = document.getElementById('dur-unit').value;
+  if (!op || isNaN(raw)) return null;
+  const ms = unit === 'ms' ? raw : unit === 's' ? raw * 1_000 : unit === 'min' ? raw * 60_000 : raw * 3_600_000;
+  return { op, ms: Math.round(ms) };
+}
+
+const STATUS_VALUES = {
+  succeeded: ['Succeeded'],
+  failed:    ['Failed'],
+  running:   ['Running'],
+  waiting:   ['Waiting', 'Suspended'],
+  canceled:  ['Cancelled', 'Canceled'],
+};
+
+const SORT_COLUMNS = { date: 'starttime', duration: 'duration', status: 'status', error: 'errorcode' };
+
+function _runQueryUrl(meta) {
+  const quoteIds = meta.idText;
+  const flowMap = new Map(_allFlows.map(f => [(f.workflowid ?? '').toLowerCase(), (f.name ?? '').toLowerCase()]));
+  let ids = _selectedFlowId ? [_selectedFlowId.toLowerCase()] : [...flowMap.keys()].filter(Boolean);
+  const str = v => `'${String(v).replace(/'/g, "''")}'`;
+  const idEq = list => list.map(id => `workflowid eq ${quoteIds ? str(id) : id}`).join(' or ');
+  const clauses = [];
+
+  const query = document.getElementById('exec-search').value.trim();
+  let searchClause = null;
+  if (query) {
+    const q = query.toLowerCase();
+    const nameIds = ids.filter(id => (flowMap.get(id) ?? '').includes(q));
+    const parts = [];
+    if (nameIds.length) parts.push(`(${idEq(nameIds)})`);
+    if (!_runErrorSearchOff) parts.push(`contains(errorcode,${str(query)})`);
+    if (!parts.length) return { empty: true };
+    if (_runErrorSearchOff) ids = nameIds;
+    else searchClause = parts.length > 1 ? `(${parts.join(' or ')})` : parts[0];
+  }
+
+  if (ids.length > RUN_MAX_FLOWS) return { tooMany: ids.length };
+  clauses.push(`(${idEq(ids)})`);
+  if (searchClause) clauses.push(searchClause);
+
+  const fromVal = document.getElementById('exec-from').value;
+  const toVal   = document.getElementById('exec-to').value;
+  if (fromVal) clauses.push(`starttime ge ${new Date(fromVal).toISOString()}`);
+  if (toVal)   clauses.push(`starttime le ${new Date(toVal).toISOString()}`);
+
+  const status = document.getElementById('exec-status-filter').value;
+  if (status && STATUS_VALUES[status]) {
+    clauses.push(`(${STATUS_VALUES[status].map(v => `status eq ${str(v)}`).join(' or ')})`);
+  }
+
+  const dur = _durationFilterMs();
+  if (dur && meta.durationNumeric) clauses.push(`duration ${dur.op} ${dur.ms}`);
+
+  const sortCol = SORT_COLUMNS[_execSortKey] ?? 'starttime';
+  const dir = _execSortKey in SORT_COLUMNS ? (_execSortDir === 1 ? 'asc' : 'desc') : 'desc';
+  const order = sortCol === 'starttime' ? `starttime ${dir}` : `${sortCol} ${dir},starttime desc`;
+
+  return {
+    url: `${ENV_URL}/api/data/v9.2/flowruns` +
+      `?$select=name,workflowid,status,errorcode,starttime,createdon,duration,modifiedon` +
+      `&$filter=${encodeURIComponent(clauses.join(' and '))}` +
+      `&$orderby=${encodeURIComponent(order)}`,
+    hasErrorSearch: !!query && !_runErrorSearchOff,
+  };
+}
+
 async function _loadExecutions() {
+  clearTimeout(_execReloadTimer);
+  const token = ++_execToken;
+  _runPages   = [];
+  _runNext    = [];
+  _runPage    = 0;
+  _runLoading = false;
+  _allExecutions = [];
+  _renderPager();
+
   if (_allFlows.length === 0) {
     _showPanelMsg('exec-list', 'No flows loaded.', 'info');
     return;
   }
-
-  _showPanelMsg('exec-list', 'Loading executions…', 'loading');
-
   if (!_orgId) {
     _showPanelMsg('exec-list',
       'Power Apps Environment ID is not configured for this environment. ' +
@@ -312,51 +410,94 @@ async function _loadExecutions() {
     return;
   }
 
-  try {
-    const fromVal = document.getElementById('exec-from').value;
-    const toVal   = document.getElementById('exec-to').value;
+  _showPanelMsg('exec-list', 'Loading executions…', 'loading');
+  const meta = await _runMeta();
+  if (token !== _execToken) return;
 
-    // Server-side date filter (best-effort — some environments don't honour OData
-    // filtering on flowruns.starttime; _renderExecutions also filters client-side).
-    const conditions = [];
-    if (fromVal) conditions.push(`starttime ge ${new Date(fromVal).toISOString()}`);
-    if (toVal)   conditions.push(`starttime le ${new Date(toVal).toISOString()}`);
-
-    const token     = ++_execToken;
-    const quoteIds  = await _runFlowIdIsText();
-    const flowIds   = _allFlows.map(f => (f.workflowid ?? '').toLowerCase()).filter(Boolean);
-    const flowIdSet = new Set(flowIds);
-    const chunks    = [];
-    for (let i = 0; i < flowIds.length; i += RUN_FLOW_CHUNK) chunks.push(flowIds.slice(i, i + RUN_FLOW_CHUNK));
-
-    const raw = [];
-    let truncated = false;
-    let done = 0;
-    await Promise.all(chunks.map(async ids => {
-      const idClause = ids.map(id => `workflowid eq ${quoteIds ? `'${id}'` : id}`).join(' or ');
-      const execUrl = `${ENV_URL}/api/data/v9.2/flowruns` +
-        `?$select=name,workflowid,status,errorcode,starttime,createdon,duration,modifiedon` +
-        `&$filter=${encodeURIComponent([`(${idClause})`, ...conditions].join(' and '))}` +
-        `&$orderby=starttime desc`;
-      const result = await _fetchAllPages(execUrl, RUN_MAX_PAGES, pageRecords => {
-        if (token !== _execToken) return;
-        done += pageRecords.length;
-        _updatePanelMsg('exec-list', `Loading executions… ${done.toLocaleString()} so far`);
-      });
-      if (result.truncated) truncated = true;
-      raw.push(...result);
-    }));
-    if (token !== _execToken) return;
-
-    _allExecutions = raw.filter(e => flowIdSet.has((e.workflowid ?? '').toLowerCase()));
-    _execTruncated = truncated;
-
-    _renderExecutions();
-  } catch (e) {
-    console.error('[EF PPT]', e);
-    _execToken++;
-    _showPanelMsg('exec-list', `Error loading executions: ${e.message}`, 'error');
+  const q = _runQueryUrl(meta);
+  if (q.empty) {
+    _setExecCount('');
+    _showPanelMsg('exec-list', 'No flows or errors match the search.', 'info');
+    return;
   }
+  if (q.tooMany) {
+    _setExecCount('');
+    _showPanelMsg('exec-list',
+      `This solution has ${q.tooMany} flows — too many to query together. Select a flow on the left, or search by flow name.`,
+      'info');
+    return;
+  }
+  _runFirstUrl = q.url;
+  await _loadRunPage(0, token, q.hasErrorSearch);
+}
+
+async function _loadRunPage(index, token = _execToken, retryable = false) {
+  if (index < 0 || _runLoading) return;
+  if (_runPages[index]) {
+    _runPage = index;
+    _allExecutions = _runPages[index];
+    _renderExecutions();
+    return;
+  }
+  const url = index === 0 ? _runFirstUrl : _runNext[index - 1];
+  if (!url) return;
+
+  _runLoading = true;
+  if (index > 0) _renderPager(true);
+  let data;
+  try {
+    data = await _d365Fetch(url, {
+      'Prefer': `odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=${RUN_PAGE_SIZE}`,
+    });
+  } catch (e) {
+    if (token !== _execToken) return;
+    _runLoading = false;
+    if (index === 0 && retryable) {
+      console.warn('[EF PPT] Searching flow run errors is not supported here; searching flow names only.', e);
+      _runErrorSearchOff = true;
+      _loadExecutions();
+      return;
+    }
+    console.error('[EF PPT]', e);
+    if (index === 0) _showPanelMsg('exec-list', `Error loading executions: ${e.message}`, 'error');
+    else { _renderPager(false); _setExecCount(`Couldn't load page ${index + 1}`); }
+    return;
+  }
+  if (token !== _execToken) return;
+  _runLoading = false;
+
+  const flowIdSet = new Set(_allFlows.map(f => (f.workflowid ?? '').toLowerCase()));
+  const dur = _runMetaCache && !_runMetaCache.durationNumeric ? _durationFilterMs() : null;
+  _runPages[index] = (data.value ?? []).slice(0, RUN_PAGE_SIZE).filter(e => {
+    if (!flowIdSet.has((e.workflowid ?? '').toLowerCase())) return false;
+    if (!dur) return true;
+    const ms = _execDurationMs(e);
+    return ms !== null && (dur.op === 'gt' ? ms > dur.ms : ms < dur.ms);
+  });
+  _runNext[index]  = data['@odata.nextLink'] ?? null;
+  _runPage         = index;
+  _allExecutions   = _runPages[index];
+  _renderExecutions();
+}
+
+function _setExecCount(text, title = '') {
+  const el = document.getElementById('exec-count');
+  el.textContent = text;
+  el.title = title;
+}
+
+function _renderPager(busy = false) {
+  const pager = document.getElementById('exec-pager');
+  const hasNext = !!_runNext[_runPage];
+  const show = busy || _runPage > 0 || hasNext;
+  pager.classList.toggle('hidden', !show);
+  if (!show) return;
+  pager.innerHTML = `
+    <button class="exec-pager__btn" data-page="first" title="First page" ${busy || _runPage === 0 ? 'disabled' : ''}>&laquo;</button>
+    <button class="exec-pager__btn" data-page="prev" ${busy || _runPage === 0 ? 'disabled' : ''}>&lsaquo; Prev</button>
+    <span class="exec-pager__label">${busy ? 'Loading…' : `Page ${_runPage + 1}`}</span>
+    <button class="exec-pager__btn" data-page="next" ${busy || !hasNext ? 'disabled' : ''}>Next &rsaquo;</button>
+  `;
 }
 
 // ─── Render flows ──────────────────────────────────────────────────────────────
@@ -420,7 +561,7 @@ function _renderFlows() {
         scopeEl.textContent = '';
         clearBtn.classList.add('hidden');
       }
-      _renderExecutions();
+      _loadExecutions();
     });
 
     list.appendChild(item);
@@ -430,118 +571,32 @@ function _renderFlows() {
 // ─── Render executions ─────────────────────────────────────────────────────────
 
 function _renderExecutions() {
-  const query        = document.getElementById('exec-search').value.trim().toLowerCase();
-  const statusFilter = document.getElementById('exec-status-filter').value;
-
-  // Client-side date bounds (reliable backstop — server OData filter on flowruns
-  // createdon is not consistently honoured by all environments).
-  const fromVal  = document.getElementById('exec-from').value;
-  const toVal    = document.getElementById('exec-to').value;
-  const fromDate = fromVal ? new Date(fromVal) : null;
-  const toDate   = toVal   ? new Date(toVal)   : null;
-
-  // Duration filter
-  const durOp    = document.getElementById('dur-op').value;
-  const durRaw   = parseFloat(document.getElementById('dur-value').value);
-  const durUnit  = document.getElementById('dur-unit').value;
-  let   durMs    = NaN;
-  if (durOp && !isNaN(durRaw)) {
-    durMs = durUnit === 'ms'  ? durRaw
-          : durUnit === 's'   ? durRaw * 1_000
-          : durUnit === 'min' ? durRaw * 60_000
-          :                     durRaw * 3_600_000;   // 'h'
-  }
-
-  // Flow name lookup map
   const flowMap = new Map(_allFlows.map(f => [(f.workflowid ?? '').toLowerCase(), f.name ?? '(Unknown)']));
+  const rows = _allExecutions.slice();
+  const from = _runPage * RUN_PAGE_SIZE + 1;
+  const more = !!_runNext[_runPage];
 
-  _filteredExecutions = _allExecutions.filter(exec => {
-    const flowId = (exec.workflowid ?? '').toLowerCase();
-
-    // Filter to selected flow
-    if (_selectedFlowId && flowId !== _selectedFlowId.toLowerCase()) return false;
-
-    // Client-side date filter
-    if (fromDate || toDate) {
-      const d = exec.starttime ? new Date(exec.starttime) : null;
-      if (d) {
-        if (fromDate && d < fromDate) return false;
-        if (toDate   && d > toDate)   return false;
-      }
-    }
-
-    // Status filter
-    if (statusFilter) {
-      const st = _execStatus(exec);
-      if (st.cls !== statusFilter) return false;
-    }
-
-    // Duration filter
-    if (!isNaN(durMs)) {
-      const dur = _execDurationMs(exec);
-      if (dur === null) return false;
-      if (durOp === 'gt' && dur <= durMs) return false;
-      if (durOp === 'lt' && dur >= durMs) return false;
-    }
-
-    // Text search: flow name or error code
-    if (query) {
-      const name = (flowMap.get(flowId) ?? '').toLowerCase();
-      const err  = (exec.errorcode ?? '').toLowerCase();
-      if (!name.includes(query) && !err.includes(query)) return false;
-    }
-
-    return true;
-  });
-
-  const countEl = document.getElementById('exec-count');
-  countEl.textContent =
-    `${_filteredExecutions.length.toLocaleString()} of ${_allExecutions.length.toLocaleString()}${_execTruncated ? '+' : ''}`;
-  countEl.title = _execTruncated
-    ? 'Some flows have more runs in this date range than can be loaded at once — narrow the date range to see them all'
-    : '';
-  countEl.classList.toggle('panel-count--warn', _execTruncated);
+  _setExecCount(
+    rows.length ? `${from.toLocaleString()}–${(from + rows.length - 1).toLocaleString()}${more ? '+' : ''}` : '0',
+    more ? 'More runs on the next page' : ''
+  );
+  _renderPager(false);
 
   const list = document.getElementById('exec-list');
-  if (_filteredExecutions.length === 0) {
-    list.innerHTML = `<div class="state-msg state-info">${
-      _allExecutions.length === 0
-        ? 'No executions found for the selected date range.'
-        : 'No executions match the current filter.'
+  if (rows.length === 0) {
+    list.innerHTML = `<div class="state-msg state-info">No executions match the selected date range and filters.${
+      _runErrorSearchOff && document.getElementById('exec-search').value.trim() ? ' (Search covers flow names only in this environment.)' : ''
     }</div>`;
     return;
   }
 
-  // ── Sort ───────────────────────────────────────────────────────────────────────
-  _filteredExecutions.sort((a, b) => {
-    let av, bv;
-    switch (_execSortKey) {
-      case 'status':
-        av = _execStatus(a).label;
-        bv = _execStatus(b).label;
-        break;
-      case 'flow':
-        av = (flowMap.get((a.workflowid ?? '').toLowerCase()) ?? '').toLowerCase();
-        bv = (flowMap.get((b.workflowid ?? '').toLowerCase()) ?? '').toLowerCase();
-        break;
-      case 'date':
-        av = a.starttime ?? '';
-        bv = b.starttime ?? '';
-        break;
-      case 'duration':
-        av = _execDurationMs(a) ?? -1;   // nulls sort to bottom
-        bv = _execDurationMs(b) ?? -1;
-        break;
-      case 'error':
-        av = (a.errorcode ?? '').toLowerCase();
-        bv = (b.errorcode ?? '').toLowerCase();
-        break;
-      default: return 0;
-    }
-    if (av < bv) return -_execSortDir;
-    if (av > bv) return  _execSortDir;
-    return 0;
-  });
+  if (_execSortKey === 'flow') {
+    rows.sort((a, b) => {
+      const av = (flowMap.get((a.workflowid ?? '').toLowerCase()) ?? '').toLowerCase();
+      const bv = (flowMap.get((b.workflowid ?? '').toLowerCase()) ?? '').toLowerCase();
+      return av < bv ? -_execSortDir : av > bv ? _execSortDir : 0;
+    });
+  }
 
   list.innerHTML = '';
 
@@ -553,14 +608,13 @@ function _renderExecutions() {
     </colgroup>
     <thead><tr>
       <th class="exec-th" data-sort="status">Status ${_execSortIcon('status')}</th>
-      <th class="exec-th" data-sort="flow">Flow ${_execSortIcon('flow')}</th>
+      <th class="exec-th" data-sort="flow" title="Sorts the runs on this page">Flow ${_execSortIcon('flow')}</th>
       <th class="exec-th" data-sort="date">Date ${_execSortIcon('date')}</th>
       <th class="exec-th" data-sort="duration">Duration ${_execSortIcon('duration')}</th>
       <th class="exec-th" data-sort="error">Error ${_execSortIcon('error')}</th>
     </tr></thead>
   `;
 
-  // Delegated click on the header — no need to re-query after every render.
   table.addEventListener('click', e => {
     const th = e.target.closest('[data-sort]');
     if (!th) return;
@@ -569,14 +623,15 @@ function _renderExecutions() {
       _execSortDir *= -1;
     } else {
       _execSortKey = key;
-      _execSortDir = key === 'date' ? -1 : 1;  // date defaults desc, others asc
+      _execSortDir = key === 'date' ? -1 : 1;
     }
-    _renderExecutions();
+    if (key === 'flow') _renderExecutions();
+    else _loadExecutions();
   });
 
   const tbody = document.createElement('tbody');
 
-  _filteredExecutions.forEach(exec => {
+  rows.forEach(exec => {
     const st         = _execStatus(exec);
     const flowId     = (exec.workflowid ?? '').toLowerCase();
     const flowName   = flowMap.get(flowId) ?? '—';
@@ -613,6 +668,7 @@ function _renderExecutions() {
 
   table.appendChild(tbody);
   list.appendChild(table);
+  list.scrollTop = 0;
 }
 
 // ─── Status helpers ────────────────────────────────────────────────────────────
@@ -638,11 +694,6 @@ function _execStatus(exec) {
 function _showPanelMsg(panelId, msg, type = 'info') {
   document.getElementById(panelId).innerHTML =
     `<div class="state-msg state-${type}">${_esc(msg)}</div>`;
-}
-
-function _updatePanelMsg(panelId, msg) {
-  const el = document.querySelector(`#${panelId} > .state-msg`);
-  if (el) el.textContent = msg;
 }
 
 function _fmtDate(iso) {
