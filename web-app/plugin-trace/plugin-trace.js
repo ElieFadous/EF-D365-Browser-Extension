@@ -30,6 +30,12 @@ let _queryToken    = 0;
 let _searchTimer   = null;
 let _loadingPage   = false;
 let _fetchedAt     = null;
+let _view          = 'logs';
+let _sumPeriod     = '7';
+let _sumKey        = null;
+let _sumToken      = 0;
+let _sumData       = null;
+let _pane          = null;
 
 // ─── Ignored types ────────────────────────────────────────────────────────────
 
@@ -46,7 +52,13 @@ function _saveIgnoredTypes() {
 async function _ignoreType(shortName) {
   _ignoredTypes.add(shortName);
   await _saveIgnoredTypes();
+  _ignoredChanged();
+}
+
+function _ignoredChanged() {
+  _sumKey = null;
   _fetchLogs();
+  if (_view === 'summary') _loadSummary();
 }
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
@@ -58,7 +70,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   _loadIgnoredTypes();
 
   // Wire controls.
-  document.getElementById('btn-refresh').addEventListener('click', () => _fetchLogs());
+  document.getElementById('btn-refresh').addEventListener('click', () => {
+    if (_view === 'summary') _loadSummary(true);
+    else _fetchLogs();
+  });
+  _bindSummary();
   document.getElementById('btn-apply').addEventListener('click', () => _fetchLogs());
   document.getElementById('btn-clear').addEventListener('click', () => {
     document.getElementById('filter-from').value = '';
@@ -96,7 +112,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!e.target.closest('[data-unignore]')) return;
     _ignoredTypes.clear();
     await _saveIgnoredTypes();
-    _fetchLogs();
+    _ignoredChanged();
   });
 
   document.getElementById('pager').addEventListener('click', e => {
@@ -120,6 +136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
+  _setView(_readView());
   _showLoading('Fetching plug-in trace logs…');
   try {
     await _fetchLogs();
@@ -475,11 +492,12 @@ function _buildRow(log) {
   // Toggle expand on summary click.
   summary.addEventListener('click', () => {
     const isOpen = row.classList.contains('expanded');
-    document.querySelectorAll('.pt-log-row.expanded').forEach(r => r.classList.remove('expanded'));
+    const inMainList = row.parentElement && row.parentElement.id === 'log-list';
+    (row.parentElement || document).querySelectorAll('.pt-log-row.expanded').forEach(r => r.classList.remove('expanded'));
     if (!isOpen) {
       _expandRow(row, log);
-      _openLogId = log.plugintracelogid;
-    } else {
+      if (inMainList) _openLogId = log.plugintracelogid;
+    } else if (inMainList) {
       _openLogId = null;
     }
   });
@@ -561,6 +579,409 @@ function _buildDetail(log) {
   detail.appendChild(metaSection);
 
   return detail;
+}
+
+function _readView() {
+  try { return localStorage.getItem('ef_ppt_pluginTraceView') === 'summary' ? 'summary' : 'logs'; }
+  catch { return 'logs'; }
+}
+
+function _setView(view, remember = false) {
+  _view = view === 'summary' ? 'summary' : 'logs';
+  document.querySelectorAll('.pt-tab').forEach(btn => {
+    const on = btn.dataset.view === _view;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  document.getElementById('logs-view').classList.toggle('hidden', _view !== 'logs');
+  document.getElementById('summary-view').classList.toggle('hidden', _view !== 'summary');
+  if (remember) { try { localStorage.setItem('ef_ppt_pluginTraceView', _view); } catch { } }
+  if (_view === 'summary' && ENV_URL) _loadSummary();
+}
+
+function _bindSummary() {
+  document.querySelectorAll('.pt-tab').forEach(btn =>
+    btn.addEventListener('click', () => _setView(btn.dataset.view, true))
+  );
+  document.querySelectorAll('.sum-period__btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.sum-period__btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _sumPeriod = btn.dataset.period;
+      _loadSummary();
+    });
+  });
+  document.getElementById('summary-view').addEventListener('click', async e => {
+    if (e.target.closest('[data-unignore]')) {
+      _ignoredTypes.clear();
+      await _saveIgnoredTypes();
+      _ignoredChanged();
+      return;
+    }
+    const target = e.target.closest('[data-open]');
+    if (target) _openPane(target.dataset.open, target.dataset.plugin || null);
+  });
+  document.getElementById('sum-pane-close').addEventListener('click', () => _closePane());
+  document.getElementById('sum-pane-pager').addEventListener('click', e => {
+    const btn = e.target.closest('[data-pp]');
+    if (!btn || btn.disabled || !_pane) return;
+    _paneLoad(btn.dataset.pp === 'first' ? 0 : btn.dataset.pp === 'prev' ? _pane.page - 1 : _pane.page + 1);
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && _pane && !document.getElementById('_pt-ctx-menu')) _closePane();
+  });
+}
+
+function _periodText() {
+  return _sumPeriod === '1' ? 'last 24 hours' : `last ${_sumPeriod} days`;
+}
+
+function _sumFrom() {
+  return new Date(Date.now() - Number(_sumPeriod) * 86_400_000).toISOString();
+}
+
+function _exceptionCond() {
+  return _cond('exceptiondetails', 'like', '_%');
+}
+
+function _pluginFilter(short) {
+  return `<filter type="or">${_cond('typename', 'eq', short)}${_cond('typename', 'like', `${_likeEscape(short)},%`)}</filter>`;
+}
+
+function _sumFilter(extra = []) {
+  const ignored = [..._ignoredTypes].flatMap(name => [
+    _cond('typename', 'ne', name),
+    _cond('typename', 'not-like', `${_likeEscape(name)},%`),
+  ]);
+  return `<filter type="and">${[_cond('createdon', 'ge', _sumFrom()), ...ignored, ...extra].join('')}</filter>`;
+}
+
+function _fmtMs(ms) {
+  if (ms == null || isNaN(ms)) return '—';
+  ms = Math.round(Number(ms));
+  if (ms < 1000) return `${ms.toLocaleString()} ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(s < 10 ? 2 : 1)} s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${Math.round(s % 60)}s`;
+}
+
+async function _groupStats(extra, withDurations) {
+  const filter = _sumFilter(extra);
+  const groups = new Map();
+  const add = (typename, n, mx, av, last) => {
+    const name = _shortName(typename ?? '') || '(unknown plugin)';
+    const g = groups.get(name) || { name, n: 0, mx: null, sum: 0, nd: 0, last: null };
+    g.n += n;
+    if (mx != null && (g.mx == null || mx > g.mx)) g.mx = mx;
+    if (av != null) { g.sum += av * n; g.nd += n; }
+    if (last && (!g.last || last > g.last)) g.last = last;
+    groups.set(name, g);
+  };
+  const aggXml =
+    '<fetch aggregate="true"><entity name="plugintracelog">' +
+      '<attribute name="typename" alias="t" groupby="true"/>' +
+      '<attribute name="plugintracelogid" alias="n" aggregate="count"/>' +
+      (withDurations
+        ? '<attribute name="performanceexecutionduration" alias="mx" aggregate="max"/>' +
+          '<attribute name="performanceexecutionduration" alias="av" aggregate="avg"/>'
+        : '<attribute name="createdon" alias="last" aggregate="max"/>') +
+      filter +
+    '</entity></fetch>';
+  try {
+    const d = await _d365Fetch(_fetchXmlUrl(aggXml));
+    (d.value ?? []).forEach(r => add(
+      r.t, Number(r.n) || 0,
+      r.mx != null ? Number(r.mx) : null,
+      r.av != null ? Number(r.av) : null,
+      r.last ?? null
+    ));
+    return { groups: [...groups.values()], exact: true };
+  } catch (e) {
+    console.warn('[EF PPT] Aggregate query failed; summarising the newest 5,000 logs instead.', e);
+  }
+  const sampleXml =
+    '<fetch count="5000" page="1"><entity name="plugintracelog">' +
+      '<attribute name="typename"/><attribute name="createdon"/>' +
+      (withDurations ? '<attribute name="performanceexecutionduration"/>' : '') +
+      '<order attribute="createdon" descending="true"/>' +
+      filter +
+    '</entity></fetch>';
+  const d = await _d365Fetch(_fetchXmlUrl(sampleXml), { 'Prefer': 'odata.include-annotations="*"' });
+  (d.value ?? []).forEach(r => {
+    const ms = r.performanceexecutionduration != null ? Number(r.performanceexecutionduration) : null;
+    add(r.typename, 1, ms, ms, r.createdon);
+  });
+  return { groups: [...groups.values()], exact: d['@Microsoft.Dynamics.CRM.morerecords'] !== true, sampled: true };
+}
+
+async function _loadSummary(force = false) {
+  const key = `${_sumPeriod}|${[..._ignoredTypes].sort().join(',')}`;
+  if (!force && key === _sumKey) return;
+  _sumKey = key;
+  const token = ++_sumToken;
+  _closePane(false);
+
+  document.getElementById('sum-scope').innerHTML = _esc(_periodText()) +
+    (_ignoredTypes.size
+      ? ` · <span title="${_esc([..._ignoredTypes].sort().join('\n'))}">${_ignoredTypes.size} plugin type${_ignoredTypes.size === 1 ? '' : 's'} ignored</span> <button type="button" class="pt-link-btn" data-unignore>Show all</button>`
+      : '');
+  document.getElementById('sum-updated').textContent = '';
+
+  const data = _sumData = { all: null, allErr: null, ex: null, exErr: null, recent: null, recentErr: null };
+  _renderSummary();
+
+  try {
+    await _resolveEntitySetName();
+  } catch (e) {
+    if (token !== _sumToken) return;
+    _sumData = null;
+    document.getElementById('sum-content').innerHTML = `<div class="sum-msg sum-msg--error">${_esc(e.message)}</div>`;
+    return;
+  }
+  if (token !== _sumToken) return;
+  const update = () => { if (token === _sumToken) _renderSummary(); };
+  const recentXml =
+    '<fetch count="12" page="1"><entity name="plugintracelog">' +
+      ['plugintracelogid', 'typename', 'messagename', 'createdon', 'exceptiondetails', 'mode', 'performanceexecutionduration']
+        .map(a => `<attribute name="${a}"/>`).join('') +
+      '<order attribute="createdon" descending="true"/>' +
+      _sumFilter([_exceptionCond()]) +
+    '</entity></fetch>';
+
+  await Promise.all([
+    _groupStats([], true).then(r => { data.all = r; }, e => { data.allErr = e.message; }).then(update),
+    _groupStats([_exceptionCond()], false).then(r => { data.ex = r; }, e => { data.exErr = e.message; }).then(update),
+    _d365Fetch(_fetchXmlUrl(recentXml)).then(d => { data.recent = d.value ?? []; }, e => { data.recentErr = e.message; }).then(update),
+  ]);
+  if (token !== _sumToken) return;
+  const now = new Date();
+  document.getElementById('sum-updated').textContent =
+    `Updated ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+function _pluginButton(kind, name) {
+  const active = _pane && _pane.kind === kind && _pane.plugin === name;
+  return `<button type="button" class="sum-flow${active ? ' is-active' : ''}" data-open="${kind}" data-plugin="${_esc(name)}" title="${_esc(name)}">${_esc(name)}</button>`;
+}
+
+function _sumKpi(kind, label, value, sub, tone = '') {
+  const active = _pane && _pane.kind === kind && !_pane.plugin;
+  return (
+    `<button type="button" class="sum-kpi${tone ? ` sum-kpi--${tone}` : ''}${active ? ' is-active' : ''}" data-open="${kind}">` +
+      `<span class="sum-kpi-label">${_esc(label)}</span>` +
+      `<span class="sum-kpi-value">${value}</span>` +
+      `<span class="sum-kpi-sub">${sub}</span>` +
+    `</button>`
+  );
+}
+
+function _sumBars(kind, rows, valueOf, labelOf, titleOf, tone = '') {
+  if (!rows.length) return `<div class="sum-msg">Nothing in the ${_esc(_periodText())}.</div>`;
+  const peak = Math.max(...rows.map(valueOf)) || 1;
+  return `<ul class="sum-bars${tone ? ` sum-bars--${tone}` : ''}">${rows.map(r => `
+    <li>
+      ${_pluginButton(kind, r.name)}
+      <span class="sum-bar"><span style="width:${Math.max(4, (valueOf(r) / peak) * 100)}%"></span></span>
+      <span class="sum-val" title="${_esc(titleOf(r))}">${_esc(labelOf(r))}</span>
+    </li>`).join('')}</ul>`;
+}
+
+function _renderSummary() {
+  const d = _sumData;
+  if (!d) return;
+  const content = document.getElementById('sum-content');
+  if (!content.querySelector('.sum-kpis')) {
+    content.innerHTML = `
+      <div class="sum-kpis" id="sum-kpis"></div>
+      <div class="sum-grid">
+        <section class="sum-card">
+          <header class="sum-card-head"><span>Slowest plugins</span><small>longest single execution</small></header>
+          <div class="sum-card-body" id="sum-slowest"></div>
+        </section>
+        <section class="sum-card">
+          <header class="sum-card-head"><span>Most exceptions</span><small>failed executions per plugin</small></header>
+          <div class="sum-card-body" id="sum-exceptions"></div>
+        </section>
+        <section class="sum-card">
+          <header class="sum-card-head"><span>Busiest plugins</span><small>executions per plugin</small></header>
+          <div class="sum-card-body" id="sum-busiest"></div>
+        </section>
+        <section class="sum-card sum-card--wide">
+          <header class="sum-card-head"><span>Most recent exceptions</span><small>click a plugin to see all its exceptions</small></header>
+          <div class="sum-card-body" id="sum-recent"></div>
+        </section>
+      </div>`;
+  }
+  const loading = '<div class="sum-msg sum-msg--loading">Loading…</div>';
+  const err = msg => `<div class="sum-msg sum-msg--error">${_esc(msg)}</div>`;
+  const sampledNote = r => r && r.sampled && !r.exact ?'<div class="sum-note">Too many logs to total exactly — based on the newest 5,000.</div>' : '';
+
+  const all = d.all ? d.all.groups : null;
+  const ex = d.ex ? d.ex.groups : null;
+  const total = all ? all.reduce((a, g) => a + g.n, 0) : null;
+  const exTotal = ex ? ex.reduce((a, g) => a + g.n, 0) : null;
+  const slow = all ? all.filter(g => g.mx != null).sort((a, b) => b.mx - a.mx) : [];
+  const nd = all ? all.reduce((a, g) => a + g.nd, 0) : 0;
+  const avg = nd ? all.reduce((a, g) => a + g.sum, 0) / nd : null;
+  const plus = r => r && !r.exact ? '+' : '';
+  const rate = d.all && d.ex && d.all.exact && d.ex.exact && total
+    ? `${((exTotal / total) * 100).toFixed(exTotal / total < 0.1 ? 1 : 0)}% of executions`
+    : _esc(_periodText());
+
+  document.getElementById('sum-kpis').innerHTML =
+    _sumKpi('all', 'Executions', d.allErr ? '—' : all ? `${total.toLocaleString()}${plus(d.all)}` : '…', _esc(_periodText())) +
+    _sumKpi('exceptions', 'Exceptions', d.exErr ? '—' : ex ? `${exTotal.toLocaleString()}${plus(d.ex)}` : '…', rate, exTotal ? 'bad' : '') +
+    _sumKpi('exceptions', 'Plugins with exceptions', d.exErr ? '—' : ex ? ex.length.toLocaleString() : '…', all ? `of ${all.length.toLocaleString()} plugins` : '') +
+    _sumKpi('slowest', 'Slowest execution', d.allErr ? '—' : all ? (slow[0] ? _esc(_fmtMs(slow[0].mx)) : '—') : '…', slow[0] ? _esc(slow[0].name) : '') +
+    _sumKpi('slowest', 'Average duration', d.allErr ? '—' : all ? _esc(_fmtMs(avg)) : '…', 'per execution');
+
+  document.getElementById('sum-slowest').innerHTML = d.allErr ? err(d.allErr) : !all ? loading :
+    _sumBars('slowest', slow.slice(0, 8), g => g.mx, g => _fmtMs(g.mx), g => `Average ${_fmtMs(g.nd ? g.sum / g.nd : null)} over ${g.n.toLocaleString()} executions`) + sampledNote(d.all);
+  document.getElementById('sum-busiest').innerHTML = d.allErr ? err(d.allErr) : !all ? loading :
+    _sumBars('all', all.slice().sort((a, b) => b.n - a.n).slice(0, 8), g => g.n, g => g.n.toLocaleString(), g => `Average ${_fmtMs(g.nd ? g.sum / g.nd : null)}`) + sampledNote(d.all);
+  document.getElementById('sum-exceptions').innerHTML = d.exErr ? err(d.exErr) : !ex ? loading :
+    !ex.length ? `<div class="sum-msg sum-msg--ok">No exceptions in the ${_esc(_periodText())}.</div>` :
+    _sumBars('exceptions', ex.slice().sort((a, b) => b.n - a.n).slice(0, 8), g => g.n, g => g.n.toLocaleString(), g => g.last ? `Last exception ${_fmtDateTime(g.last)}` : '', 'bad') + sampledNote(d.ex);
+
+  const recentEl = document.getElementById('sum-recent');
+  if (d.recentErr) recentEl.innerHTML = err(d.recentErr);
+  else if (!d.recent) recentEl.innerHTML = loading;
+  else if (!d.recent.length) recentEl.innerHTML = `<div class="sum-msg sum-msg--ok">No exceptions in the ${_esc(_periodText())}.</div>`;
+  else {
+    recentEl.innerHTML = `<table class="sum-recent">
+      <colgroup><col style="width:130px"><col style="width:30%"><col style="width:110px"><col></colgroup>
+      <tbody>${d.recent.map(log => {
+        const name = _shortName(log.typename ?? '') || '(unknown plugin)';
+        const first = String(log.exceptiondetails ?? '').split(/\r?\n/).find(l => l.trim()) ?? '';
+        return `<tr>
+          <td class="sum-time">${_esc(_fmtDateTime(log.createdon))}</td>
+          <td>${_pluginButton('exceptions', name)}</td>
+          <td class="sum-msgname">${_esc(log.messagename ?? '—')}</td>
+          <td class="sum-err" title="${_esc(String(log.exceptiondetails ?? '').slice(0, 1500))}">${_esc(first.length > 160 ? first.slice(0, 160) + '…' : first)}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  }
+}
+
+const PANE_KINDS = {
+  all:        { title: 'Executions',         sub: 'newest first',  order: 'createdon' },
+  exceptions: { title: 'Exceptions',         sub: 'newest first',  order: 'createdon', exceptions: true },
+  slowest:    { title: 'Slowest executions', sub: 'slowest first', order: 'duration' },
+};
+let _paneToken = 0;
+
+function _openPane(kind, plugin) {
+  const cfg = PANE_KINDS[kind];
+  if (!cfg) return;
+  _pane = { kind, plugin: plugin || null, pages: [], more: [], total: null, capped: false, page: 0, loading: false, token: ++_paneToken };
+  document.getElementById('sum-pane-title').textContent = `${cfg.title} — ${plugin || 'all plugins'}`;
+  document.getElementById('sum-pane-title').title = plugin || '';
+  document.getElementById('sum-pane-sub').textContent = `${_periodText()} · ${cfg.sub}`;
+  document.getElementById('sum-pane').classList.remove('hidden');
+  document.getElementById('summary-view').classList.add('pt-summary--pane');
+  _renderSummary();
+  _paneLoad(0);
+}
+
+function _closePane(rerender = true) {
+  if (!_pane) return;
+  _pane = null;
+  _paneToken++;
+  document.getElementById('sum-pane').classList.add('hidden');
+  document.getElementById('summary-view').classList.remove('pt-summary--pane');
+  if (rerender) _renderSummary();
+}
+
+function _paneXml(p, index) {
+  const cfg = PANE_KINDS[p.kind];
+  const extra = [];
+  if (cfg.exceptions) extra.push(_exceptionCond());
+  if (p.plugin) extra.push(_pluginFilter(p.plugin));
+  const order = cfg.order === 'duration'
+    ? '<order attribute="performanceexecutionduration" descending="true"/><order attribute="createdon" descending="true"/>'
+    : '<order attribute="createdon" descending="true"/>';
+  return `<fetch count="${PAGE_SIZE}" page="${index + 1}" returntotalrecordcount="true">` +
+    '<entity name="plugintracelog">' +
+      _ATTRS.map(attr => `<attribute name="${attr}"/>`).join('') +
+      order +
+      '<order attribute="plugintracelogid" descending="true"/>' +
+      _sumFilter(extra) +
+    '</entity></fetch>';
+}
+
+async function _paneLoad(index) {
+  const p = _pane;
+  if (!p || index < 0 || p.loading) return;
+  if (p.pages[index]) {
+    p.page = index;
+    _renderPane();
+    return;
+  }
+  p.loading = true;
+  if (index === 0) {
+    document.getElementById('sum-pane-list').innerHTML = '<div class="sum-msg sum-msg--loading">Loading logs…</div>';
+    document.getElementById('sum-pane-count').textContent = '';
+    document.getElementById('sum-pane-pager').classList.add('hidden');
+  } else {
+    _renderPanePager(true);
+  }
+  let d;
+  try {
+    d = await _d365Fetch(_fetchXmlUrl(_paneXml(p, index)), { 'Prefer': 'odata.include-annotations="*"' });
+  } catch (e) {
+    if (p !== _pane) return;
+    p.loading = false;
+    if (index === 0) document.getElementById('sum-pane-list').innerHTML = `<div class="sum-msg sum-msg--error">${_esc(e.message)}</div>`;
+    else _renderPanePager(false);
+    return;
+  }
+  if (p !== _pane) return;
+  p.loading = false;
+  if (index === 0) {
+    const total = d['@Microsoft.Dynamics.CRM.totalrecordcount'];
+    p.total = typeof total === 'number' && total >= 0 ? total : null;
+    p.capped = d['@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded'] === true;
+  }
+  p.pages[index] = (d.value ?? []).slice(0, PAGE_SIZE);
+  p.more[index] = d['@Microsoft.Dynamics.CRM.morerecords'] === true;
+  p.page = index;
+  _renderPane();
+}
+
+function _renderPanePager(busy) {
+  const p = _pane;
+  const pager = document.getElementById('sum-pane-pager');
+  const show = busy || p.page > 0 || !!p.more[p.page];
+  pager.classList.toggle('hidden', !show);
+  if (!show) return;
+  const pages = p.total != null ? Math.max(1, Math.ceil(p.total / PAGE_SIZE)) : null;
+  pager.innerHTML = `
+    <button class="pt-pager__btn" data-pp="first" title="First page" ${busy || p.page === 0 ? 'disabled' : ''}>&laquo;</button>
+    <button class="pt-pager__btn" data-pp="prev" ${busy || p.page === 0 ? 'disabled' : ''}>&lsaquo; Prev</button>
+    <span class="pt-pager__label">${busy ? 'Loading…' : `Page ${p.page + 1}${pages ? ` of ${pages.toLocaleString()}${p.capped ? '+' : ''}` : ''}`}</span>
+    <button class="pt-pager__btn" data-pp="next" ${busy || !p.more[p.page] ? 'disabled' : ''}>Next &rsaquo;</button>
+  `;
+}
+
+function _renderPane() {
+  const p = _pane;
+  const rows = p.pages[p.page] ?? [];
+  const list = document.getElementById('sum-pane-list');
+  const from = p.page * PAGE_SIZE + 1;
+  document.getElementById('sum-pane-count').textContent = rows.length
+    ? `${from.toLocaleString()}–${(from + rows.length - 1).toLocaleString()}${p.total != null ? ` of ${p.total.toLocaleString()}${p.capped ? '+' : ''}` : ''}`
+    : '0';
+  _renderPanePager(false);
+  if (!rows.length) {
+    list.innerHTML = '<div class="sum-msg">No logs match.</div>';
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  rows.forEach(log => frag.appendChild(_buildRow(log)));
+  list.replaceChildren(frag);
+  list.scrollTop = 0;
 }
 
 // ─── Context menu ─────────────────────────────────────────────────────────────

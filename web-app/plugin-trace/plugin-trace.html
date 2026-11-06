@@ -22,8 +22,16 @@
         <span id="env-name" class="pt-header__sub">Loading&hellip;</span>
       </div>
     </div>
-    <button id="btn-refresh" class="pt-icon-btn" title="Refresh">&#8635;</button>
+    <div class="pt-header__actions">
+      <div class="pt-tabs" role="tablist">
+        <button type="button" class="pt-tab active" data-view="logs" role="tab" aria-selected="true">Logs</button>
+        <button type="button" class="pt-tab" data-view="summary" role="tab" aria-selected="false">Summary</button>
+      </div>
+      <button id="btn-refresh" class="pt-icon-btn" title="Refresh">&#8635;</button>
+    </div>
   </header>
+
+  <div id="logs-view" class="pt-view">
 
   <!-- ── Toolbar ── -->
   <div class="pt-toolbar">
@@ -60,6 +68,36 @@
   <!-- ── Log list ── -->
   <div id="log-list" class="pt-log-list">
     <!-- rows injected by plugin-trace.js -->
+  </div>
+  </div>
+
+  <div id="summary-view" class="pt-summary hidden">
+    <div class="sum-main">
+      <div class="sum-toolbar">
+        <span class="sum-title">Summary</span>
+        <span class="sum-scope" id="sum-scope"></span>
+        <span class="sum-spacer"></span>
+        <span class="sum-updated" id="sum-updated"></span>
+        <div class="pt-seg" role="group" aria-label="Period">
+          <button type="button" class="sum-period__btn" data-period="1">24 hours</button>
+          <button type="button" class="sum-period__btn active" data-period="7">7 days</button>
+          <button type="button" class="sum-period__btn" data-period="28">28 days</button>
+        </div>
+      </div>
+      <div class="sum-content" id="sum-content"></div>
+    </div>
+    <aside class="sum-pane hidden" id="sum-pane">
+      <div class="sum-pane-head">
+        <div class="sum-pane-titles">
+          <div class="sum-pane-title" id="sum-pane-title"></div>
+          <div class="sum-pane-sub" id="sum-pane-sub"></div>
+        </div>
+        <span class="sum-pane-count" id="sum-pane-count"></span>
+        <button type="button" class="sum-pane-close" id="sum-pane-close" title="Close" aria-label="Close">&#215;</button>
+      </div>
+      <div class="pt-log-list" id="sum-pane-list"></div>
+      <div class="sum-pager hidden" id="sum-pane-pager"></div>
+    </aside>
   </div>
 
   <script src="plugin-trace.js"></script>
