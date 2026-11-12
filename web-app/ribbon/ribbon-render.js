@@ -8,8 +8,9 @@
 'use strict';
 
 import { state }                from './ribbon-state.js';
-import { describeCondition }    from './ribbon-xml.js';
-import { fetchEntityRibbonXml } from './ribbon-load.js';
+import { describeCondition, buttonLabel, locLabelId } from './ribbon-xml.js';
+import { fetchEntityRibbonXml, ensureLocLabelsForEntities } from './ribbon-load.js';
+import { iconHtml, iconSourcesHtml, iconSources, hydrateIcons } from './ribbon-icons.js';
 
 // ─── Entity-click callback ────────────────────────────────────────────────
 
@@ -145,7 +146,9 @@ export function renderButtonCards() {
 
   const filtered = query
     ? buttons.filter(b =>
+        buttonLabel(b).toLowerCase().includes(query) ||
         b.label.toLowerCase().includes(query) ||
+        iconSources(b).some(x => x.src.raw.toLowerCase().includes(query)) ||
         b.id.toLowerCase().includes(query)    ||
         b.command.toLowerCase().includes(query) ||
         (state.globalCommandDefs.get(b.command)?.action?.functionName ?? '').toLowerCase().includes(query)
@@ -158,7 +161,7 @@ export function renderButtonCards() {
       const eb = b._entity || '';
       if (ea !== eb) return ea.localeCompare(eb);
     }
-    return (a.label || a.id).localeCompare(b.label || b.id);
+    return buttonLabel(a).localeCompare(buttonLabel(b));
   });
 
   document.getElementById('btn-count').textContent =
@@ -186,6 +189,24 @@ export function renderButtonCards() {
   for (const [entityKey, groupBtns] of groups) {
     container.appendChild(_buildGroupSection(entityKey, groupBtns, !multiSelect));
   }
+
+  hydrateIcons(container);
+  const pending = [...new Set(
+    buttons.filter(b => { const ref = locLabelId(b); return ref && !state.globalLocLabels.has(ref); }).map(b => b._entity ?? '')
+  )];
+  if (pending.length) {
+    ensureLocLabelsForEntities(pending).then(added => { if (added) _applyLocLabels(); }, () => {});
+  }
+}
+
+function _applyLocLabels() {
+  document.querySelectorAll('[data-loclabel]').forEach(el => {
+    const text = state.globalLocLabels.get(el.dataset.loclabel);
+    if (!text) return;
+    el.textContent = text;
+    el.removeAttribute('data-loclabel');
+    el.parentElement.querySelector('.btn-card-id')?.classList.remove('hidden');
+  });
 }
 
 function _buildGroupSection(entity, buttons, startExpanded = false) {
@@ -290,16 +311,20 @@ export function buildButtonCard(button) {
     ? `<div class="btn-card-location">${esc(button.location)}</div>`
     : '';
 
-  const displayLabel   = (button.label && !button.label.startsWith('$LocLabels:')) ? button.label : button.id;
+  const displayLabel   = buttonLabel(button);
   const showSeparateId = displayLabel !== button.id;
+  const pendingRef     = !showSeparateId ? locLabelId(button) : null;
 
   const div = document.createElement('div');
   div.className = 'btn-card';
   div.innerHTML = `
     <div class="btn-card-header">
-      <div>
-        <div class="btn-card-label">${esc(displayLabel)}</div>
-        ${showSeparateId ? `<div class="btn-card-id">${esc(button.id)}</div>` : ''}
+      <div class="btn-card-title">
+        ${iconHtml(button)}
+        <div class="btn-card-names">
+          <div class="btn-card-label"${pendingRef ? ` data-loclabel="${esc(pendingRef)}"` : ''}>${esc(displayLabel)}</div>
+          <div class="btn-card-id${showSeparateId ? '' : ' hidden'}">${esc(button.id)}</div>
+        </div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
         <span class="btn-type-badge">${esc(button.tagName)}</span>
@@ -307,6 +332,7 @@ export function buildButtonCard(button) {
     </div>
     ${button.command ? `<div class="btn-card-command">Command: <code>${esc(button.command)}</code></div>` : ''}
     ${locationHtml}
+    ${iconSourcesHtml(button)}
     ${actionHtml}
     ${displayRulesHtml}
     ${enableRulesHtml}
@@ -322,7 +348,7 @@ export function buildButtonCard(button) {
     e.stopPropagation();
     document.dispatchEvent(new CustomEvent('ribbon:view-xml', {
       detail: {
-        label:      displayLabel,
+        label:      buttonLabel(button),
         buttonXml:  button._sourceXml ?? '',
         commandXml: state.globalCommandDefs.get(button.command)?.rawXml ?? '',
       }

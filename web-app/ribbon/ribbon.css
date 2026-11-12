@@ -341,6 +341,23 @@ html, body {
   gap: 12px; padding: 12px 14px 10px; border-bottom: 1px solid var(--border-light); background: #fafbfd;
 }
 .btn-card-label { font-size: 13px; font-weight: 700; color: var(--text); line-height: 1.3; }
+.btn-card-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.btn-card-names { min-width: 0; }
+.btn-icon {
+  flex-shrink: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 6px; background: #fff; overflow: hidden;
+  font-size: 11px; font-weight: 700; color: var(--text-muted);
+}
+.btn-icon img { max-width: 24px; max-height: 24px; object-fit: contain; }
+.btn-icon--none { color: #c3cad6; border-style: dashed; font-size: 14px; }
+.btn-icon--missing { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+.btn-icon--symbol { color: var(--primary-light); background: #eef2ff; border-color: #c7d2fe; text-transform: none; }
+.btn-icon--loading { background: linear-gradient(90deg, #f1f4f9 25%, #e5eaf3 50%, #f1f4f9 75%); background-size: 200% 100%; animation: btn-icon-shimmer 1.2s linear infinite; }
+@keyframes btn-icon-shimmer { to { background-position: -200% 0; } }
+.icon-list { list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+.icon-list code { font-family: Consolas, monospace; font-size: 11px; word-break: break-all; }
+.icon-slot { display: inline-block; min-width: 54px; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .3px; }
+.icon-kind { font-size: 10px; color: var(--text-muted); }
 .btn-card-id    { font-size: 10px; font-family: "Consolas", monospace; color: var(--text-muted); margin-top: 2px; word-break: break-all; }
 
 .btn-type-badge {

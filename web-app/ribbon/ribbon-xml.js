@@ -41,6 +41,7 @@ export function mergeIntoGlobalMaps(parsed) {
   parsed.commandDefs.forEach((def, id)   => state.globalCommandDefs.set(id, def));
   parsed.displayRuleDefs.forEach((c, id) => state.globalDisplayRuleDefs.set(id, c));
   parsed.enableRuleDefs.forEach((c, id)  => state.globalEnableRuleDefs.set(id, c));
+  (parsed.locLabels ?? new Map()).forEach((t, id) => state.globalLocLabels.set(id, t));
 }
 
 export function emptyParsed() {
@@ -49,6 +50,7 @@ export function emptyParsed() {
     commandDefs:     new Map(),
     displayRuleDefs: new Map(),
     enableRuleDefs:  new Map(),
+    locLabels:       new Map(),
   };
 }
 
@@ -119,10 +121,9 @@ function _parseFragment(el) {
       if (id) enableRuleDefs.set(id, _parseConditions(el));
       break;
     }
-    // HideCustomAction, LocLabel — nothing to extract for button listing.
   }
 
-  return { buttons, commandDefs, displayRuleDefs, enableRuleDefs };
+  return { buttons, commandDefs, displayRuleDefs, enableRuleDefs, locLabels: _collectLocLabels(el) };
 }
 
 // ─── Full-document parser (RibbonDiffXml or RetrieveEntityRibbon output) ───
@@ -164,7 +165,7 @@ function _parseFullDoc(doc, filterStandard) {
     if (id) enableRuleDefs.set(id, _parseConditions(rule));
   });
 
-  return { buttons, commandDefs, displayRuleDefs, enableRuleDefs };
+  return { buttons, commandDefs, displayRuleDefs, enableRuleDefs, locLabels: _collectLocLabels(doc.documentElement) };
 }
 
 // ─── Shared helpers ────────────────────────────────────────────────────────
@@ -187,6 +188,7 @@ function _extractButtons(cud, location, buttons, isStd = () => false) {
           id,
           label:      el.getAttribute('LabelText') ?? '',
           command:    el.getAttribute('Command')   ?? '',
+          icon:       _iconAttrs(el),
           location,
           tagName:    tag,
           _sourceXml: _serializeEl(el),   // serialised from the live DOM element
@@ -194,6 +196,41 @@ function _extractButtons(cud, location, buttons, isStd = () => false) {
       }
     });
   });
+}
+
+function _iconAttrs(el) {
+  return {
+    modern: el.getAttribute('ModernImage')  ?? '',
+    img32:  el.getAttribute('Image32by32')  ?? '',
+    img16:  el.getAttribute('Image16by16')  ?? '',
+  };
+}
+
+function _collectLocLabels(root) {
+  const labels = new Map();
+  if (!root) return labels;
+  const nodes = root.tagName === 'LocLabel' ? [root] : Array.from(root.querySelectorAll('LocLabel'));
+  nodes.forEach(node => {
+    const id = node.getAttribute('Id') ?? '';
+    if (!id) return;
+    const titles = Array.from(node.querySelectorAll('Title'));
+    const pick = titles.find(t => t.getAttribute('languagecode') === '1033') ?? titles[0];
+    const text = pick?.getAttribute('description') ?? '';
+    if (text) labels.set(id, text);
+  });
+  return labels;
+}
+
+export function locLabelId(button) {
+  const m = /^\$LocLabels:(.+)$/.exec(button.label ?? '');
+  return m ? m[1].trim() : null;
+}
+
+export function buttonLabel(button) {
+  const ref = locLabelId(button);
+  if (ref) return state.globalLocLabels.get(ref) || button.id;
+  if (!button.label || button.label.startsWith('$Resources:')) return button.id;
+  return button.label;
 }
 
 function _parseCommandDef(el) {
@@ -259,6 +296,7 @@ function _parseCompiledRibbon(doc) {
         id,
         label:      el.getAttribute('LabelText') ?? '',
         command:    el.getAttribute('Command')   ?? '',
+        icon:       _iconAttrs(el),
         location,
         tagName:    el.tagName,
         _sourceXml: _serializeEl(el),
@@ -288,7 +326,7 @@ function _parseCompiledRibbon(doc) {
     if (id) enableRuleDefs.set(id, _parseConditions(rule));
   });
 
-  return { buttons, commandDefs, displayRuleDefs, enableRuleDefs };
+  return { buttons, commandDefs, displayRuleDefs, enableRuleDefs, locLabels: _collectLocLabels(doc.documentElement) };
 }
 
 /**

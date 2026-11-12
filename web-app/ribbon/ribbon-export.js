@@ -8,7 +8,7 @@ import { state }                    from './ribbon-state.js';
 import { ensureAllRibbonDataLoaded } from './ribbon-load.js';
 import { getEntityGroups,
          getButtonsForEntity }       from './ribbon-render.js';
-import { describeCondition }         from './ribbon-xml.js';
+import { describeCondition, buttonLabel } from './ribbon-xml.js';
 
 // ─── Modal open / close ────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ export async function runExport() {
 
   const rows = [[
     'Entity', 'Button Label', 'Button ID', 'Type', 'Location',
-    'Command ID', 'Function Name', 'Library', 'Parameters',
+    'Modern Icon', 'Image 32x32', 'Image 16x16', 'Command ID', 'Function Name', 'Library', 'Parameters',
     'Display Rules', 'Enable Rules',
   ]];
 
@@ -87,12 +87,12 @@ export async function runExport() {
     const entityLabel = entity || '(Application Ribbon)';
     const buttons = getButtonsForEntity(entity)
       .slice()
-      .sort((a, b) => (a.label || a.id).localeCompare(b.label || b.id));
+      .sort((a, b) => buttonLabel(a).localeCompare(buttonLabel(b)));
 
     for (const btn of buttons) {
       const cmd          = state.globalCommandDefs.get(btn.command) ?? null;
       const action       = cmd?.action ?? null;
-      const displayLabel = (btn.label && !btn.label.startsWith('$LocLabels:')) ? btn.label : btn.id;
+      const displayLabel = buttonLabel(btn);
 
       const paramsText = action?.params.length
         ? action.params.map(p => `[${p.type.replace('Parameter', '')}] ${p.value}`).join('; ')
@@ -106,7 +106,8 @@ export async function runExport() {
         }).join(' | ');
 
       rows.push([
-        entityLabel, displayLabel, btn.id, btn.tagName, btn.location, btn.command,
+        entityLabel, displayLabel, btn.id, btn.tagName, btn.location,
+        btn.icon?.modern ?? '', btn.icon?.img32 ?? '', btn.icon?.img16 ?? '', btn.command,
         action?.functionName ?? '',
         action?.library.replace(/^\$webresource:/, '') ?? '',
         paramsText,

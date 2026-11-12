@@ -65,6 +65,23 @@ export async function ensureAllRibbonDataLoaded() {
   state.allRibbonDataLoaded = true;
 }
 
+export async function ensureLocLabelsForEntities(entities) {
+  const todo = entities.filter(e => !state.locLabelEntities.has(e));
+  if (!todo.length) return false;
+  todo.forEach(e => state.locLabelEntities.add(e));
+  const rows = await _fetchEntitiesParallel(todo);
+  let added = false;
+  for (const row of rows) {
+    if (!state.xmlFieldName) state.xmlFieldName = detectXmlField(row);
+    const xmlStr = state.xmlFieldName ? (row[state.xmlFieldName] ?? null) : null;
+    if (!xmlStr || !xmlStr.includes('LocLabel')) continue;
+    parseRibbonXml(xmlStr).locLabels.forEach((text, id) => {
+      if (!state.globalLocLabels.has(id)) { state.globalLocLabels.set(id, text); added = true; }
+    });
+  }
+  return added;
+}
+
 // ─── Per-entity compiled ribbon loader ────────────────────────────────────
 
 /**

@@ -28,6 +28,8 @@ export const state = {
   globalCommandDefs:     new Map(),
   globalDisplayRuleDefs: new Map(),
   globalEnableRuleDefs:  new Map(),
+  globalLocLabels:       new Map(),
+  locLabelEntities:      new Set(),
 
   /**
    * Per-entity compiled ribbon cache populated by ensureEntityRibbonLoaded().
@@ -55,4 +57,6 @@ export function resetLoadState() {
   state.globalCommandDefs.clear();
   state.globalDisplayRuleDefs.clear();
   state.globalEnableRuleDefs.clear();
+  state.globalLocLabels.clear();
+  state.locLabelEntities.clear();
 }
