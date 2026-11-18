@@ -1959,4 +1959,12 @@
   ensureRecordDetailsLoaded(parseRecordContext());
   renderFlyout();
 
+  window.__EF_PPT_LAUNCHER = {
+    applyConfig: function () {
+      if (!window.__EF_PPT_INIT_CONFIG) return;
+      CFG = loadConfig();
+      renderFlyout();
+    },
+  };
+
 })();

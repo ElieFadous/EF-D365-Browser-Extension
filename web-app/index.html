@@ -216,6 +216,9 @@
   }
 
   /* The actual draggable bookmark */
+  .bookmarklet-status { margin-top: 10px; font-size: 12.5px; }
+  .bookmarklet-status--ok { color: #15803d; }
+  .bookmarklet-status--empty { color: #b45309; }
   .bookmarklet-link {
     display: inline-flex;
     align-items: center;
@@ -536,6 +539,7 @@
                   drag to bookmark bar
                 </span>
               </div>
+              <div class="bookmarklet-status" id="bookmarklet-status"></div>
             </div>
           </div>
         </div>
@@ -706,8 +710,9 @@
     }
     return (
       "javascript:(function(){" +
-        "if(window.__EF_PPT_LAUNCHER)return;" +
         cfgPart +
+        "var L=window.__EF_PPT_LAUNCHER;" +
+        "if(L){if(L.applyConfig)L.applyConfig();return;}" +
         "var s=document.createElement('script');" +
         "s.src='https://eliefadous.github.io/EF-D365-Browser-Extension/web-app/launcher.js?v='+Date.now();" +
         "s.onerror=function(){alert('Unable to load EF PPT from this page. It may be blocking external scripts via its security policy (common on non-Dynamics 365 pages). Try it on a Dynamics 365 page instead.');};" +
@@ -717,8 +722,17 @@
   }
   function refreshBookmarklet() {
     document.getElementById('bookmarklet-link').href = generateBookmarklet();
+    var status = document.getElementById('bookmarklet-status');
+    var n = 0;
+    try {
+      var cfg = JSON.parse(localStorage.getItem(CONFIG_KEY) || 'null');
+      n = cfg && Array.isArray(cfg.environments) ? cfg.environments.length : 0;
+    } catch (e) { n = 0; }
+    status.className = 'bookmarklet-status' + (n ? ' bookmarklet-status--ok' : ' bookmarklet-status--empty');
+    status.textContent = n
+      ? 'This bookmark includes your saved config (' + n + ' environment' + (n === 1 ? '' : 's') + ').'
+      : 'No saved config yet — this bookmark has no environments. Save your config below, then drag the bookmark.';
   }
-  refreshBookmarklet();
 
   /* ── Starter template ──────────────────────────────────── */
   var STARTER = {
@@ -832,6 +846,7 @@
 
   /* ── Init ──────────────────────────────────────────────── */
   loadConfig();
+  refreshBookmarklet();
 })();
 </script>
 
